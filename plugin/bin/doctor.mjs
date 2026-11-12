@@ -60,12 +60,23 @@ let beat = {};
 try { beat = JSON.parse(fs.readFileSync(path.join(STATE_HOME, "hook-heartbeat.json"), "utf8")); } catch { /* 还没有 */ }
 const recent = Object.entries(beat).filter(([, v]) => v.version === VERSION && Date.now() - v.ts < 6 * 3600 * 1000).map(([k]) => k);
 const live = recent.includes("UserPromptSubmit") || recent.includes("SessionStart");
+const settingsFile = path.join(process.env.WORKBUDDY_CONFIG_DIR || path.join(os.homedir(), ".workbuddy"), "settings.json");
+// 没有调用记录时，先看设置里有没有启用：没有这一项或不是 true，WorkBuddy 都不会加载插件。
+let notEnabled = false;
+if (!live) {
+  try {
+    const all = JSON.parse(fs.readFileSync(settingsFile, "utf8").replace(/^﻿/, "")).enabledPlugins || {};
+    notEnabled = !Object.entries(all).some(([k, v]) => v === true && k.startsWith("quality-workflow@"));
+  } catch { /* 读不到设置就按一般情况提示 */ }
+}
 check("WorkBuddy 调用插件", live,
-  live ? `最近 6 小时收到：${recent.join("、")}` : "没有收到 WorkBuddy 的调用记录。",
-  live ? undefined : "确认插件已在 WorkBuddy 的插件管理里安装并启用，然后新建一个任务，在新任务里再运行一次 doctor。如果仍未通过，重启 WorkBuddy 后再试。");
+  live ? `最近 6 小时收到：${recent.join("、")}`
+    : notEnabled ? "没有收到 WorkBuddy 的调用记录。原因：WorkBuddy 的设置里没有启用这个插件。" : "没有收到 WorkBuddy 的调用记录。",
+  live ? undefined
+    : notEnabled ? "请用户打开“专家·技能·连接器 → 技能 → 套件”，把 quality-workflow 的开关打开，然后完全退出并重新打开 WorkBuddy，新建一个任务再运行一次 doctor。也可以在完全退出 WorkBuddy 后重新运行一次 install.mjs。"
+    : "确认插件已在 WorkBuddy 的插件管理里安装并启用，然后新建一个任务，在新任务里再运行一次 doctor。如果仍未通过，重启 WorkBuddy 后再试。");
 
 // 5. 旧版插件冲突
-const settingsFile = path.join(process.env.WORKBUDDY_CONFIG_DIR || path.join(os.homedir(), ".workbuddy"), "settings.json");
 let conflicts = [];
 try {
   const enabled = JSON.parse(fs.readFileSync(settingsFile, "utf8")).enabledPlugins || {};

@@ -143,15 +143,71 @@ const inst = wb("install", `${PLUGIN}@${MARKET}`);
 if (!inst.ok) fail(`安装失败：\n${inst.out}`);
 
 // 7. 核对
-const after = readJson(path.join(configDir, "plugins", "installed_plugins.json"))?.plugins?.[`${PLUGIN}@${MARKET}`];
-const enabled = readJson(path.join(configDir, "settings.json"))?.enabledPlugins?.[`${PLUGIN}@${MARKET}`];
+const KEY = `${PLUGIN}@${MARKET}`;
+const settingsFile = path.join(configDir, "settings.json");
+const after = readJson(path.join(configDir, "plugins", "installed_plugins.json"))?.plugins?.[KEY];
 if (!after) fail("安装命令执行了，但安装记录里没有找到插件。");
-if (enabled === false) {
-  const en = wb("enable", `${PLUGIN}@${MARKET}`);
-  if (!en.ok) fail(`插件已安装但没有启用：\n${en.out}`);
+
+// 8. 启用。只有设置里明确写着 true 才算启用：没有这一项时 WorkBuddy 不会加载插件。
+// WorkBuddy 正在运行时（Windows 上尤其常见）设置文件可能被占用，所以要重试，并在最后如实报告。
+const isEnabled = () => readJson(settingsFile)?.enabledPlugins?.[KEY] === true;
+const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+function writeEnabled() {
+  let raw = "{}";
+  try { raw = fs.readFileSync(settingsFile, "utf8"); } catch (e) { if (e.code !== "ENOENT") throw e; }
+  const data = JSON.parse(raw.replace(/^﻿/, "") || "{}"); // 解析不了就不动这个文件
+  data.enabledPlugins = { ...(data.enabledPlugins || {}), [KEY]: true };
+  fs.writeFileSync(settingsFile, `${JSON.stringify(data, null, 2)}\n`);
+}
+let enableError = "";
+for (let i = 0; i < 8 && !isEnabled(); i += 1) {
+  if (i) sleep(1000);
+  const en = wb("enable", KEY);
+  if (isEnabled()) break;
+  if (!en.ok) enableError = en.out;
+  try { writeEnabled(); } catch (e) { enableError = `${e.code || ""} ${e.message}`.trim(); }
+}
+
+if (!isEnabled()) {
+  // 留一个后台小程序，在接下来 30 分钟里等设置文件可写（比如用户退出 WorkBuddy 时）再写入。
+  let later = false;
+  try {
+    const helper = path.join(os.homedir(), ".quality-workflow", "enable-later.mjs");
+    fs.writeFileSync(helper, [
+      'import fs from "node:fs";',
+      `const file = ${JSON.stringify(settingsFile)}, key = ${JSON.stringify(KEY)};`,
+      "const end = Date.now() + 30 * 60 * 1000;",
+      "const tick = () => {",
+      "  try {",
+      '    const data = JSON.parse(fs.readFileSync(file, "utf8").replace(/^\\uFEFF/, "") || "{}");',
+      "    if (data.enabledPlugins?.[key] !== true) {",
+      "      data.enabledPlugins = { ...(data.enabledPlugins || {}), [key]: true };",
+      '      fs.writeFileSync(file, JSON.stringify(data, null, 2) + "\\n");',
+      "    }",
+      "  } catch { /* 还被占用，下次再试 */ }",
+      "  if (Date.now() < end) setTimeout(tick, 3000);",
+      "};",
+      "tick();",
+    ].join("\n"));
+    const { spawn } = await import("node:child_process");
+    spawn(process.execPath, [helper], { detached: true, stdio: "ignore", windowsHide: true }).unref();
+    later = true;
+  } catch { /* 后台补写启动不了，就只靠下面的手动办法 */ }
+
+  console.log("  已安装，但还没有启用。");
+  console.log(`\n插件已安装，但没有启用：quality-workflow ${VERSION} 的文件已装好，启用状态没能写进 WorkBuddy 的设置文件。`);
+  console.log(`原因：${enableError || "设置文件写入后没有生效"}。通常是 WorkBuddy 正在运行，占用了设置文件。`);
+  console.log("请用户按下面做：");
+  if (later) console.log("  1. 现在完全退出 WorkBuddy（不是只关窗口），等 10 秒再打开。安装程序会在 WorkBuddy 退出时自动补上启用状态，30 分钟内有效。");
+  else console.log("  1. 完全退出并重新打开 WorkBuddy。");
+  console.log("  2. 打开“专家·技能·连接器 → 技能 → 套件”，找到 quality-workflow，确认开关是打开的；没有打开就手动打开，再重启一次 WorkBuddy。");
+  console.log("  3. 新建一个任务，随便发一句话。看到运行安装自检的提醒，说明插件已经生效，按提示完成自检。");
+  if (pythonNote) console.log(pythonNote);
+  process.exit(2);
 }
 
 console.log(`  已安装并启用。`);
 console.log(`\n安装成功：quality-workflow ${VERSION} 已安装并启用。`);
 if (pythonNote) console.log(pythonNote);
+if (IS_WIN) console.log("Windows 用户请注意：重新打开 WorkBuddy 后，先到“专家·技能·连接器 → 技能 → 套件”确认 quality-workflow 的开关是打开的；没有打开就手动打开，再重启一次 WorkBuddy。");
 console.log("下一步：请用户完全退出并重新打开 WorkBuddy，然后新建一个任务，随便发一句话。新任务会自动提醒运行安装自检，按提示操作直到自检全部通过。");
