@@ -1,0 +1,5 @@
+{
+  "name": "quality-workflow",
+  "version": "0.3.2",
+  "description": "通用工作流程：先找出决定结果的关键项，先验证再使用，做完逐项核对证据，如实交付。Mac 和 Windows 通用。"
+}
