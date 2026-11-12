@@ -36,7 +36,7 @@ class WB(unittest.TestCase):
         self.root = os.path.realpath(tempfile.mkdtemp(prefix="qwb-proj-"))
         self.home = os.path.realpath(tempfile.mkdtemp(prefix="qwb-home-"))
         os.makedirs(os.path.join(self.root, "docs"))
-        self.env = dict(os.environ, HOME=self.home, USERPROFILE=self.home, CODEBUDDY_PROJECT_DIR=self.root, QFLOW_PYTHON=sys.executable)
+        self.env = dict(os.environ, HOME=self.home, USERPROFILE=self.home, CODEBUDDY_PROJECT_DIR=self.root, QFLOW_PYTHON=sys.executable, QFLOW_NO_UPDATE_CHECK="1")
         for k in ("CLAUDE_PROJECT_DIR", "QFLOW_DISABLED", "QFLOW_NO_HEARTBEAT", "WORKBUDDY_CONFIG_DIR"):
             self.env.pop(k, None)
 
@@ -126,6 +126,75 @@ class WB(unittest.TestCase):
             json.dump({"version": version}, f)
         out = self.hook("SessionStart", source="startup")
         self.assertNotIn("doctor.mjs", out["hookSpecificOutput"]["additionalContext"])
+
+    def write_latest(self, version, **extra):
+        os.makedirs(os.path.join(self.home, ".quality-workflow"), exist_ok=True)
+        with open(os.path.join(self.home, ".quality-workflow", "latest.json"), "w") as f:
+            json.dump(dict(ts=int(time.time() * 1000), version=version, **extra), f)
+
+    def test_update_notice_once_per_day(self):
+        env = dict(self.env)
+        env.pop("QFLOW_NO_UPDATE_CHECK")
+        self.write_latest("99.0.0")
+        out = self.hook("SessionStart", env=env, source="startup")
+        self.assertIn("99.0.0", out["hookSpecificOutput"]["additionalContext"])
+        self.assertIn("update.mjs", out["hookSpecificOutput"]["additionalContext"])
+        self.assertIn("更新插件", out.get("systemMessage", ""))
+        out = self.hook("SessionStart", env=env, source="startup")
+        self.assertNotIn("99.0.0", out["hookSpecificOutput"]["additionalContext"])
+
+    def test_no_notice_when_current_or_disabled(self):
+        env = dict(self.env)
+        env.pop("QFLOW_NO_UPDATE_CHECK")
+        version = json.load(open(os.path.join(PLUGIN, ".codebuddy-plugin", "plugin.json")))["version"]
+        self.write_latest(version)
+        out = self.hook("SessionStart", env=env, source="startup")
+        self.assertNotIn("新版本", out["hookSpecificOutput"]["additionalContext"])
+        self.write_latest("99.0.0")
+        out = self.hook("SessionStart", source="startup")
+        self.assertNotIn("新版本", out["hookSpecificOutput"]["additionalContext"])
+
+    def test_doctor_pass_survives_version_change(self):
+        os.makedirs(os.path.join(self.home, ".quality-workflow"), exist_ok=True)
+        with open(os.path.join(self.home, ".quality-workflow", "doctor-ok.json"), "w") as f:
+            json.dump({"version": "0.0.1", "platform": sys.platform if sys.platform != "darwin" else "darwin"}, f)
+        out = self.hook("SessionStart", source="startup")
+        self.assertNotIn("doctor.mjs", out["hookSpecificOutput"]["additionalContext"])
+
+    def test_check_update_reads_manifest(self):
+        import http.server
+        import threading
+        body = json.dumps({"plugins": [{"name": "quality-workflow", "version": "9.8.7"}]}).encode()
+
+        class H(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                code = 200 if self.path.startswith("/ok") else 404
+                self.send_response(code)
+                self.end_headers()
+                if code == 200:
+                    self.wfile.write(body)
+
+            def log_message(self, *a):
+                pass
+
+        srv = http.server.HTTPServer(("127.0.0.1", 0), H)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        try:
+            base = "http://127.0.0.1:%d" % srv.server_port
+            env = dict(self.env, QFLOW_UPDATE_URLS="%s/missing %s/ok" % (base, base))
+            r = subprocess.run([NODE, os.path.join(PLUGIN, "bin", "check-update.mjs"), "--print"], env=env, capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            data = json.load(open(os.path.join(self.home, ".quality-workflow", "latest.json")))
+            self.assertEqual(data["version"], "9.8.7")
+            self.assertTrue(data["source"].endswith("/ok"))
+        finally:
+            srv.shutdown()
+
+    def test_compare_version(self):
+        code = ('import("%s").then(m => console.log([m.compareVersion("0.10.0","0.9.9")>0, m.compareVersion("0.4.0","0.4.0")===0,'
+                ' m.compareVersion("0.3.3","0.4.0")<0, m.compareVersion("1.0","0.9.9")>0].join(",")))') % os.path.join(PLUGIN, "bin", "wb.mjs").replace("\\", "/")
+        r = subprocess.run([NODE, "--input-type=module", "-e", code], capture_output=True, text=True)
+        self.assertEqual(r.stdout.strip(), "true,true,true,true", r.stderr)
 
     def test_heartbeat_and_doctor(self):
         r = subprocess.run([NODE, DOCTOR], env=self.env, capture_output=True, text=True)

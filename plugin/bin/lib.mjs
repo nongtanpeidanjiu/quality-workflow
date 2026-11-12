@@ -123,9 +123,24 @@ export function recordHeartbeat(event) {
   } catch { /* 心跳失败不影响关卡 */ }
 }
 
+// 这台电脑上通过过一次自检就算数。自动升级到新版本后不再重复提醒。
 export function doctorPassed() {
   try {
     const d = JSON.parse(fs.readFileSync(path.join(STATE_HOME, "doctor-ok.json"), "utf8"));
-    return d.version === VERSION;
+    return Boolean(d.version) && (!d.platform || d.platform === process.platform);
   } catch { return false; }
+}
+
+// 新版本提醒：读后台查询的结果，过期了就在后台再查一次（不等结果）。
+// 返回提醒文字；没有新版本、关掉了检查、或者今天已经提醒过，返回空。
+export function updateNotice({ compare, spawnCheck }) {
+  if (process.env.QFLOW_NO_UPDATE_CHECK === "1") return "";
+  const file = path.join(STATE_HOME, "latest.json");
+  let latest = null;
+  try { latest = JSON.parse(fs.readFileSync(file, "utf8")); } catch { /* 还没查过 */ }
+  if (!latest || Date.now() - (latest.ts || 0) > 24 * 3600 * 1000) spawnCheck();
+  if (!latest?.version || compare(latest.version, VERSION) <= 0) return "";
+  if (latest.notified === latest.version && Date.now() - (latest.notifiedAt || 0) < 24 * 3600 * 1000) return "";
+  try { fs.writeFileSync(file, JSON.stringify({ ...latest, notified: latest.version, notifiedAt: Date.now() }, null, 2)); } catch { /* 记不下就下次再提醒 */ }
+  return latest.version;
 }

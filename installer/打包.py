@@ -18,6 +18,16 @@ NAME = "quality-workflow-%s" % VERSION
 OUT = os.path.join(DIST, NAME)
 SKIP = {"tests", "__pycache__", ".DS_Store"}
 
+# 仓库根目录的市场清单是 WorkBuddy 自动更新读取的，版本号必须和插件一致。
+ROOT_MARKET = os.path.join(REPO, ".codebuddy-plugin", "marketplace.json")
+root_manifest = json.load(open(ROOT_MARKET, encoding="utf-8"))
+if root_manifest["plugins"][0]["version"] != VERSION:
+    root_manifest["plugins"][0]["version"] = VERSION
+    with open(ROOT_MARKET, "w", encoding="utf-8") as f:
+        json.dump(root_manifest, f, ensure_ascii=False, indent=2)
+        f.write("\n")
+    print("已把根目录市场清单的版本号改为 %s" % VERSION)
+
 shutil.rmtree(OUT, ignore_errors=True)
 os.makedirs(DIST, exist_ok=True)
 plugin_dst = os.path.join(OUT, "marketplace", "plugins", "quality-workflow")

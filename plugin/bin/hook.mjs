@@ -2,7 +2,9 @@
 // zsh、Git Bash、PowerShell 下写法相同，所以 Mac 和 Windows 共用一份配置。
 import fs from "node:fs";
 import path from "node:path";
-import { PLUGIN_ROOT, findPython, projectDir, runPython, recordHeartbeat, doctorPassed } from "./lib.mjs";
+import { spawn } from "node:child_process";
+import { PLUGIN_ROOT, VERSION, findPython, projectDir, runPython, recordHeartbeat, doctorPassed, updateNotice } from "./lib.mjs";
+import { compareVersion } from "./wb.mjs";
 
 function out(obj) {
   if (obj) process.stdout.write(JSON.stringify(obj));
@@ -62,6 +64,29 @@ if (event === "SessionStart" && !doctorPassed()) {
   obj.hookSpecificOutput = spec;
   obj.systemMessage = "quality-workflow 插件还没有完成安装自检，智能体会先运行自检。";
   stdout = JSON.stringify(obj);
+}
+
+// 新版本提醒：每天最多一次，只在新任务开始时。
+if (event === "SessionStart") {
+  const latest = updateNotice({
+    compare: compareVersion,
+    spawnCheck: () => {
+      try {
+        spawn(process.execPath, [path.join(PLUGIN_ROOT, "bin", "check-update.mjs")], { detached: true, stdio: "ignore", windowsHide: true }).unref();
+      } catch { /* 查不了就算了 */ }
+    },
+  });
+  if (latest) {
+    let obj = {};
+    try { obj = stdout ? JSON.parse(stdout) : {}; } catch { obj = {}; }
+    const spec = obj.hookSpecificOutput || { hookEventName: "SessionStart" };
+    const update = `node "${path.join(PLUGIN_ROOT, "bin", "update.mjs")}"`;
+    const note = `【quality-workflow】插件有新版本 ${latest}（当前 ${VERSION}）。在第一次回复用户时，用一句话告诉用户：“quality-workflow 插件有新版本 ${latest}，说‘更新插件’即可升级。”然后照常处理用户的请求。用户说“更新插件”时，运行：${update}，把输出原样告诉用户。`;
+    spec.additionalContext = note + "\n" + (spec.additionalContext || "");
+    obj.hookSpecificOutput = spec;
+    obj.systemMessage = [obj.systemMessage, `quality-workflow 插件有新版本 ${latest}，说“更新插件”即可升级。`].filter(Boolean).join("\n");
+    stdout = JSON.stringify(obj);
+  }
 }
 
 if (stdout) process.stdout.write(stdout);

@@ -1,0 +1,14 @@
+{
+  "name": "quality-workflow-market",
+  "owner": {
+    "name": "通用工作流程"
+  },
+  "plugins": [
+    {
+      "name": "quality-workflow",
+      "source": "./plugin",
+      "version": "0.4.0",
+      "description": "先找出决定结果的关键项，先验证再使用，做完逐项核对证据，如实交付。Mac 和 Windows 通用。"
+    }
+  ]
+}
