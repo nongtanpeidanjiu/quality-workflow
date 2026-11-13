@@ -1,0 +1,30 @@
+{
+ "version": "0.4.0",
+ "ref": "v0.4.0",
+ "files": {
+  ".codex-plugin/plugin.json": "c635eb3e271487000d182663cdce169176374ab4de214e7cd58a0c57fae3d5d7",
+  "agents/independent-checker.toml": "fb7b69d13ebd8df2332f9fed4b7a637940cc2bab29f5df97e87feb555e54aaca",
+  "bin/doctor.py": "44a4830bdc89c3f7effac9ba524170fa06127c1ee48b0245179540e906897d00",
+  "bin/find-python.ps1": "01b43ae5d8153c089e58ebe87a62cfe58044f6311732ac5e05f5e92b52ab54f8",
+  "bin/find-python.sh": "5d1bb34b1f3dc920b2e47899510e79d413d2b9aa13f75fada290c69bccf4cd43",
+  "bin/hook.ps1": "3205d69bfd37f3a4bbb1c9e9f5078a292551d661335da555cf60e60235f148e7",
+  "bin/hook.sh": "3fc0aafa40bb1d534bb799c3e2ba515a64e0474b03b186051bc427c7653b9c19",
+  "bin/qf_common.py": "6684163e5eca4e9e0e80101a9238e0561add47f6c26ef514af67273c7bb48be5",
+  "bin/qf_install.py": "29897f27636f01dd8b15446f762cef50d9ab8bf449765b107385436b36f166be",
+  "bin/qflow.py": "dcbc72d2daf5ea0ece9202e72b2ad3a2e71633c3b2280012aefe14fee733944a",
+  "bin/setup-python.ps1": "95f0149b95e8d527635fe213b3455c084874bd4ac1527009305c8604f05e2d7a",
+  "bin/setup-python.sh": "0e06ffcae7455304f0de1ad249f4edefc8b386da1d6d85d71854a064bb0fef99",
+  "hooks/codex_hook.py": "be393384b44e317215b33c9b2592492a7aa8e45e94addc1fb6e60447c835cd9d",
+  "hooks/hook_handler.py": "5cf9107afcfb77f74e9b4722d38bf24b6ab5733619e3c792c10bd3aeaa26db57",
+  "hooks/hooks.json": "ef8603405a1f448a947d10d1b55eb76e5a654ed40cb4e044f983185079e1c838",
+  "scripts/flow.py": "b24edaa9deb12d7ad0b4adc9615c9e40334c7c3f09b9d27916465c5a7bd4dc19",
+  "scripts/flowlib.py": "9058c95df3a6e810386f2a3203c5c552c36360ce8712a4dccfd2d552a2532fc2",
+  "skills/quality-workflow/SKILL.md": "96bffa7046304d372aa7f4d26d1f339bcd7ba07a39e6709890df996bb5f5221b",
+  "skills/quality-workflow/assets/任务单模板.md": "917d4946364704b3da2b2560825bcf75f286704d00da37ca5d88d777cc909c47",
+  "skills/quality-workflow/references/关键项和验证.md": "c8d2a3ec5ddde1f5331ffd87bfdbdb2c05978548be0504ef51d564117213b698",
+  "skills/quality-workflow/references/核验和异常.md": "e85dbf3ba0d18fe3bccdf6895d16423b36f56b8e14b2a91cc14fad8db17ebd3f",
+  "skills/quality-workflow/references/资料和变更.md": "460c56315c1fd74eb36bde2cc077e5f92ec219afb7780556188330a5c4f2f7c7",
+  "skills/quality-workflow/references/过程细则.md": "5e2ff6f8feff1883058415344f38f4c39f5eb7d3d118ffe4309bf89a8b43ae18",
+  "skills/quality-workflow/references/需求分析.md": "a6e1480001de1944cfaea3ef5e7525f2d808b7c88182877724f55e80de8db973"
+ }
+}

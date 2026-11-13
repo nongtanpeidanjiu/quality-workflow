@@ -306,6 +306,8 @@ def parse_bash(cmd, cwd, depth=0):
 
 
 def qflow_cmd():
+    if os.environ.get("QFLOW_CMD"):
+        return os.environ["QFLOW_CMD"]
     plugin = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     launcher = os.path.join(plugin, "bin", "qflow.mjs")
     return 'node "%s"' % launcher if os.path.isfile(launcher) else "qflow"

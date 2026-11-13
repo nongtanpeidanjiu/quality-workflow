@@ -1,0 +1,27 @@
+{
+  "name": "quality-workflow",
+  "version": "0.4.0",
+  "description": "通用工作流程：先找出决定结果的关键项，先验证再使用，做完逐项核对证据，如实交付。Mac 和 Windows 通用。",
+  "author": {
+    "name": "nongtanpeidanjiu",
+    "url": "https://github.com/nongtanpeidanjiu"
+  },
+  "homepage": "https://github.com/nongtanpeidanjiu/quality-workflow",
+  "repository": "https://github.com/nongtanpeidanjiu/quality-workflow",
+  "license": "MIT",
+  "skills": "./skills/",
+  "hooks": "./hooks/hooks.json",
+  "interface": {
+    "displayName": "Quality Workflow",
+    "shortDescription": "先弄清要什么，关键项先验证再使用，做完逐项核对",
+    "longDescription": "借鉴质量管理体系的通用工作流程：找出决定结果的关键项，先验证或请用户确认再使用，做完由独立检查员逐项核对证据，如实交付。程序关卡保证规则被执行。",
+    "developerName": "nongtanpeidanjiu",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/nongtanpeidanjiu/quality-workflow"
+  }
+}

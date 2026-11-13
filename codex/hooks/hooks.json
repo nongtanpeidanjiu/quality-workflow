@@ -1,0 +1,89 @@
+{
+  "description": "quality-workflow 的流程关卡：写文件前先表态、说定前不动成果、不越界、先验证后使用、没验证完不能结束。",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${PLUGIN_ROOT}/bin/hook.sh\"",
+            "commandWindows": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"& (Join-Path ([Environment]::GetEnvironmentVariable('PLUGIN_ROOT')) 'bin\\hook.ps1')\"",
+            "timeout": 300
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${PLUGIN_ROOT}/bin/hook.sh\"",
+            "commandWindows": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"& (Join-Path ([Environment]::GetEnvironmentVariable('PLUGIN_ROOT')) 'bin\\hook.ps1')\"",
+            "timeout": 60
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${PLUGIN_ROOT}/bin/hook.sh\"",
+            "commandWindows": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"& (Join-Path ([Environment]::GetEnvironmentVariable('PLUGIN_ROOT')) 'bin\\hook.ps1')\"",
+            "timeout": 120
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${PLUGIN_ROOT}/bin/hook.sh\"",
+            "commandWindows": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"& (Join-Path ([Environment]::GetEnvironmentVariable('PLUGIN_ROOT')) 'bin\\hook.ps1')\"",
+            "timeout": 120
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${PLUGIN_ROOT}/bin/hook.sh\"",
+            "commandWindows": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"& (Join-Path ([Environment]::GetEnvironmentVariable('PLUGIN_ROOT')) 'bin\\hook.ps1')\"",
+            "timeout": 60
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${PLUGIN_ROOT}/bin/hook.sh\"",
+            "commandWindows": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"& (Join-Path ([Environment]::GetEnvironmentVariable('PLUGIN_ROOT')) 'bin\\hook.ps1')\"",
+            "timeout": 60
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${PLUGIN_ROOT}/bin/hook.sh\"",
+            "commandWindows": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"& (Join-Path ([Environment]::GetEnvironmentVariable('PLUGIN_ROOT')) 'bin\\hook.ps1')\"",
+            "timeout": 60
+          }
+        ]
+      }
+    ]
+  }
+}

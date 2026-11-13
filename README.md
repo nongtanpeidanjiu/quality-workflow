@@ -2,7 +2,14 @@
 
 **把质量管理体系装进 AI 智能体：先弄清要什么，决定结果的东西先验证再使用，做完逐项核对证据，交付时实话实说。**
 
-适用于 WorkBuddy 桌面版（Mac、Windows）。写文档、改制度、做统计、查资料、写代码，不限于某一类工作。
+写文档、改制度、做统计、查资料、写代码，不限于某一类工作。
+
+| 平台 | 支持情况 | 安装 |
+|---|---|---|
+| WorkBuddy 桌面版（Mac、Windows） | 支持。Mac 和 Windows 都实测过 | 见下文“安装” |
+| ChatGPT 桌面版的 Codex 模式（Mac、Windows） | 支持。Mac 实测过；**Windows 按官方文档编写，没有在真机上测试过** | 见 [Codex 版安装说明](docs/codex/安装说明.md) |
+
+ChatGPT 桌面版的 Work 模式和 Chat 模式不支持：前者在云端运行，官方不支持在那里运行插件的钩子；后者不操作你电脑上的文件。
 
 ---
 
@@ -145,6 +152,8 @@
 
 ## 安装
 
+下面是 WorkBuddy 版的安装方法。**Codex 版**见本节末尾。
+
 1. 从 [Releases](../../releases) 下载 `quality-workflow-0.4.0.zip`。
 2. 在 WorkBuddy 里新建一个任务，把压缩包拖进对话框，发送：
 
@@ -162,6 +171,27 @@
 
 手动安装、更新和卸载，见 [安装说明](docs/安装说明.md)。
 
+### Codex 版（ChatGPT 桌面版的 Codex 模式）
+
+1. 从 [Releases](../../releases) 下载 `quality-workflow-codex-0.4.0.zip`。
+2. 在 ChatGPT 桌面版的 Codex 里新建一个任务，把压缩包拖进对话框，发送：
+
+```
+帮我安装这个插件，按压缩包里《给智能体的安装步骤》做。
+```
+
+3. 看到“安装成功”后，完全退出并重新打开 ChatGPT 桌面版，到 **Settings > Hooks** 里把 **Quality Workflow** 的钩子全部信任并打开，再新建任务完成安装自检。
+
+电脑上不需要预先装任何东西：没有 Python 会自动装一份免安装版，不需要 git 和 Node。
+
+和 WorkBuddy 版有三点不同，都是 Codex 平台的规定决定的：
+
+- **钩子要你手动信任，** 插件每次更新后还要重新信任。没信任时，智能体会在开工前检查出来并停下，不会在关卡失效的情况下干活。
+- **不在后台自动更新。** 有新版本时提醒你，你说“更新插件”才更新。
+- **难以收回的动作没有弹窗。** 程序会先拒绝，智能体把后果告诉你，你同意后再执行一次才放行。
+
+详见 [Codex 版安装说明](docs/codex/安装说明.md)。
+
 ---
 
 ## 使用建议
@@ -177,9 +207,11 @@
 
 | 目录 | 内容 |
 |---|---|
-| [`plugin/`](plugin/) | 插件源码：流程说明、独立检查员、程序关卡、自动测试 |
+| [`plugin/`](plugin/) | WorkBuddy 版插件源码：流程说明、独立检查员、程序关卡、自动测试 |
+| [`codex/`](codex/) | Codex 版插件。流程脚本和关卡程序与 WorkBuddy 版共用同一份源码，由 `tools/sync_codex.py` 同步 |
 | [`docs/`](docs/) | [设计规格](docs/设计规格.md)、安装说明、快速安装、升级说明 |
-| [`installer/`](installer/) | 一键安装脚本、打包脚本 |
+| [`installer/`](installer/) | 一键安装脚本、打包脚本。Codex 版在 `installer/codex/` |
+| [`tests/`](tests/) | Codex 版的自动测试 |
 | [`examples/`](examples/) | 五个埋了问题的测试项目、测试说明、评分参考 |
 
 运行自动测试：
@@ -188,7 +220,17 @@
 cd plugin && python3 -m unittest discover -s tests -p 'test_*.py'
 ```
 
-打包安装包（生成在 `dist/`）：
+Codex 版的自动测试，以及改了 `plugin/` 下的共用文件后同步到 Codex 版：
+
+```bash
+python3 -m unittest discover -s tests -p 'test_*.py'
+```
+
+```bash
+python3 tools/sync_codex.py
+```
+
+打包安装包（生成在 `dist/`），Codex 版用 `installer/codex/打包.py`：
 
 ```bash
 python3 installer/打包.py
