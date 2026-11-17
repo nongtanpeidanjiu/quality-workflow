@@ -140,10 +140,20 @@ def load_task(root, tid):
     return st
 
 
+RECORD_FILE = "进度记录.md"
+RECORD_NOTE = "<!-- 确认记录和进度已移到同目录的 进度记录.md，由程序维护。 -->"
+
+
 def save_task(root, st):
     st["updated"] = now()
     write_json(os.path.join(task_dir(root, st["id"]), "state.json"), st)
-    render_generated(root, st)
+    # 状态已经存好。进度记录只是把状态再展示一遍，写不进去不能让整条命令失败。
+    try:
+        render_generated(root, st)
+    except OSError as e:
+        sys.stderr.write("提示：状态已保存，命令已成功，不需要重试。只是 %s 暂时写不进去（%s），下一条 qflow 命令会自动补写；"
+                         "这期间用 qflow status 和 qflow item list 看最新状态。\n" % (RECORD_FILE, e.strerror or e))
+    migrate_sheet(root, st)
 
 
 def active_tasks(root):
@@ -321,7 +331,8 @@ def read_sheet(root, st):
 
 
 def sections(text):
-    body = re.sub(re.escape(GEN_START) + r".*?" + re.escape(GEN_END), "", text, flags=re.S)
+    # 旧版本写在任务单末尾的记录，以及迁移后留下的那句说明，都不算任务单的内容。
+    body = re.sub(re.escape(GEN_START) + r".*?" + re.escape(GEN_END), "", text, flags=re.S).replace(RECORD_NOTE, "")
     out, cur = {}, None
     for line in body.splitlines():
         m = re.match(r"^#{2,3}\s+(.+?)\s*$", line)
@@ -715,11 +726,10 @@ def open_blockers(st):
 
 # ---------- 任务单生成段 ----------
 
-def render_generated(root, st):
-    path = os.path.join(task_dir(root, st["id"]), "任务单.md")
-    if not os.path.isfile(path):
-        return
-    lines = [GEN_START, "", "## 确认记录和当前进度（脚本生成，请勿修改）", ""]
+def record_text(root, st):
+    lines = ["# 进度记录（程序生成，请勿修改）", "",
+             "这份文件由 qflow 命令自动更新，记录确认情况、关键项的验证情况和各类变更。任务的目标、范围和关键项清单在同目录的 任务单.md 里。", "",
+             "## 确认记录和当前进度", ""]
     lines.append("- 任务状态：%s" % st["status"])
     lines.append("- 需求版本：v%d" % st["req_version"])
     for key, label in (("direction_confirm", "确认页确认"), ("result_confirm", "成果确认")):
@@ -752,16 +762,54 @@ def render_generated(root, st):
         lines += ["", "### 差异记录（检查员要核对）", "", "| 路径 | 来源 | 理由 | 用户原话 |", "|---|---|---|---|"]
         for x in st["accepted_diffs"]:
             lines.append("| %s | %s | %s | %s |" % (x["path"], x["source"], x["reason"], x.get("quote") or "—"))
-    lines += ["", GEN_END]
-    block = "\n".join(lines)
-    with open(path, encoding="utf-8") as f:
-        text = f.read()
-    if GEN_START in text and GEN_END in text:
-        text = re.sub(re.escape(GEN_START) + r".*?" + re.escape(GEN_END), lambda m: block, text, flags=re.S)
-    else:
-        text = text.rstrip() + "\n\n" + block + "\n"
-    with open(path, encoding="utf-8") as f:
-        if f.read() == text:
+    return "\n".join(lines) + "\n"
+
+
+def render_generated(root, st):
+    """把确认记录和进度写到单独的 进度记录.md。
+
+    不写进 任务单.md：任务单是智能体和用户会打开、编辑的文件，在 Windows 上被编辑器、预览窗口
+    或杀毒软件打开着时，程序覆盖写会报没有权限。进度记录只由程序写，不会有这个问题。
+    """
+    d = task_dir(root, st["id"])
+    if not os.path.isfile(os.path.join(d, "任务单.md")):
+        return
+    path = os.path.join(d, RECORD_FILE)
+    text = record_text(root, st)
+    try:
+        with open(path, encoding="utf-8") as f:
+            if f.read() == text:
+                return
+    except OSError:
+        pass
+    last = None
+    for attempt in range(4):  # 被别的程序短暂占用（比如杀毒软件正在扫描）时，等一下再试
+        fd, tmp = tempfile.mkstemp(dir=d, prefix=".tmp-")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(text)
+            os.replace(tmp, path)
             return
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(text)
+        except OSError as e:
+            last = e
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+            time.sleep(0.25)
+    raise last
+
+
+def migrate_sheet(root, st):
+    """旧版本把记录写在任务单末尾。升级后把那一段换成一句说明；任务单写不进去就留着，不影响使用。"""
+    path = os.path.join(task_dir(root, st["id"]), "任务单.md")
+    try:
+        with open(path, encoding="utf-8") as f:
+            text = f.read()
+        if GEN_START not in text or GEN_END not in text:
+            return
+        new = re.sub(re.escape(GEN_START) + r".*?" + re.escape(GEN_END), lambda m: RECORD_NOTE, text, flags=re.S)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(new)
+    except OSError:
+        pass

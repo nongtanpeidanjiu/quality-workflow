@@ -87,7 +87,7 @@ def cmd_start(root, a):
         if ".flow/" not in existing:
             with open(exclude, "a", encoding="utf-8") as f:
                 f.write("\n.flow/\n")
-    print("已建档：%s\n任务单：%s" % (tid, os.path.join(d, "任务单.md")))
+    print("已建档：%s\n任务单：%s\n进度记录：%s（程序自动更新，不要手改）" % (tid, os.path.join(d, "任务单.md"), os.path.join(d, L.RECORD_FILE)))
     if others:
         print("注意：还有进行中的任务（%s），现在的写入规则按新任务判断。需要切回时用 qflow use。" % "、".join(t["id"] for t in others))
 

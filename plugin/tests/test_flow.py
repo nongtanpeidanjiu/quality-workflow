@@ -606,7 +606,7 @@ class ReviewFindings(Base):
             f.write("y")
         self.q("fingerprint", "accept", "--all-pending", "--source", "own", "--reason", "脚本生成")
         self.assertIn("没有未记录", self.q("fingerprint", "scan"))
-        with open(os.path.join(self.tdir(), "任务单.md"), encoding="utf-8") as f:
+        with open(os.path.join(self.tdir(), "进度记录.md"), encoding="utf-8") as f:
             self.assertIn("差异记录", f.read())
 
     def test_diff_record_keeps_file_name_case(self):
@@ -745,7 +745,7 @@ class Paths(Base):
 
     def test_generated_section_written(self):
         self.to_executing()
-        with open(os.path.join(self.tdir(), "任务单.md"), encoding="utf-8") as f:
+        with open(os.path.join(self.tdir(), "进度记录.md"), encoding="utf-8") as f:
             text = f.read()
         self.assertIn("可以，就这样做", text)
         self.assertIn("任务状态：执行中", text)
@@ -958,7 +958,7 @@ class KeyItems(Base):
 
     def test_generated_section_shows_items(self):
         self.to_executing()
-        with open(os.path.join(self.tdir(), "任务单.md"), encoding="utf-8") as f:
+        with open(os.path.join(self.tdir(), "进度记录.md"), encoding="utf-8") as f:
             text = f.read()
         self.assertIn("关键项验证记录", text)
         self.assertIn("evidence/k2.md", text)
@@ -1045,7 +1045,7 @@ class V031(Base):
         self.assertIn("把一处措辞改得更顺", out)
         st = self.state()
         self.assertEqual(st["light_changes"][0]["files"], ["docs/guide.md"])
-        with open(os.path.join(self.tdir(), "任务单.md"), encoding="utf-8") as f:
+        with open(os.path.join(self.tdir(), "进度记录.md"), encoding="utf-8") as f:
             self.assertIn("小改动记录", f.read())
 
     def test_light_change_refused_when_decisive_item_touched(self):
@@ -1182,6 +1182,89 @@ class DirectGate(Base):
         text = self.hook("SessionStart", source="startup")["hookSpecificOutput"]["additionalContext"]
         self.assertIn("direct", text)
         self.assertIn("复述", text)
+
+
+class Record(Base):
+    """确认记录和进度写在单独的 进度记录.md 里，程序不改任务单。
+
+    起因：Windows 上任务单被别的程序打开着时，程序往任务单里写会报没有权限，每条命令都显示失败。
+    """
+
+    RESTATE = "我理解你要一份给新用户看的安装指南，只写 docs。分两步：核对命令，写指南。"
+
+    def understand(self, quote):
+        self.say(quote)
+        return self.q("understand", "--text", self.RESTATE, "--quote", quote)
+
+    def paths(self):
+        return os.path.join(self.tdir(), "任务单.md"), os.path.join(self.tdir(), "进度记录.md")
+
+    def test_sheet_is_never_touched(self):
+        self.q("start", "--title", "guide")
+        self.write_sheet()
+        sheet, record = self.paths()
+        before = open(sheet, encoding="utf-8").read()
+        out = self.understand("对，就按你说的理解来做")
+        self.assertEqual(open(sheet, encoding="utf-8").read(), before)
+        text = open(record, encoding="utf-8").read()
+        self.assertIn("开工前的复述", text)
+        self.assertIn("程序生成", text)
+        self.assertNotIn("qflow:generated", text)
+        self.assertNotIn("提示", out)
+        self.assertEqual([n for n in os.listdir(self.tdir()) if n.startswith(".tmp-")], [])
+
+    @unittest.skipIf(os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0), "用只读文件模拟“写不进去”，在 Windows 和管理员身份下模拟不了")
+    def test_locked_sheet_no_longer_matters(self):
+        self.q("start", "--title", "guide")
+        self.write_sheet()
+        sheet, record = self.paths()
+        os.chmod(sheet, 0o444)
+        try:
+            out = self.understand("对，就按你说的理解来做")  # 退出码必须是 0
+            self.assertNotIn("写不进去", out)
+            self.assertNotIn("Traceback", out)
+            self.assertTrue(self.state().get("understood"))
+            self.assertIn("开工前的复述", open(record, encoding="utf-8").read())
+        finally:
+            os.chmod(sheet, 0o644)
+
+    def test_unwritable_record_does_not_fail_command(self):
+        self.q("start", "--title", "guide")
+        self.write_sheet()
+        sheet, record = self.paths()
+        if os.path.exists(record):
+            os.remove(record)
+        os.mkdir(record)  # 让进度记录写不进去
+        out = self.understand("对，就按你说的理解来做")
+        self.assertIn("状态已保存", out)
+        self.assertIn("不需要重试", out)
+        self.assertNotIn("Traceback", out)
+        self.assertTrue(self.state().get("understood"))
+        self.assertEqual([n for n in os.listdir(self.tdir()) if n.startswith(".tmp-")], [])
+        os.rmdir(record)
+        out = self.understand("对，就这样")
+        self.assertNotIn("写不进去", out)
+        self.assertIn("开工前的复述", open(record, encoding="utf-8").read())  # 下一条命令自动补写
+
+    def test_old_sheet_block_is_migrated(self):
+        self.q("start", "--title", "guide")
+        old = GOOD.rstrip() + "\n\n<!-- qflow:generated:start -->\n\n## 确认记录和当前进度（脚本生成，请勿修改）\n\n- 任务状态：澄清中\n\n<!-- qflow:generated:end -->\n"
+        self.write_sheet(old)
+        sheet, record = self.paths()
+        self.understand("对，就按你说的理解来做")
+        text = open(sheet, encoding="utf-8").read()
+        self.assertNotIn("qflow:generated", text)
+        self.assertNotIn("脚本生成，请勿修改", text)
+        self.assertIn("进度记录.md", text)
+        self.assertTrue(text.startswith(GOOD.rstrip()))  # 任务单本身的内容没动
+        self.understand("对，就这样")
+        self.assertEqual(open(sheet, encoding="utf-8").read(), text)  # 只迁移一次
+
+    def test_agent_cannot_write_record(self):
+        self.q("start", "--title", "guide")
+        self.write_sheet()
+        _, record = self.paths()
+        self.assertEqual(self.decision(self.pre_write(record)), "deny")
 
 
 if __name__ == "__main__":
