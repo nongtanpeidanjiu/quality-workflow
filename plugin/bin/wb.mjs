@@ -190,6 +190,19 @@ export function installFromDir(wb, dir) {
   return { ok: true };
 }
 
+// 清掉用户目录下以前各个版本留下的本地市场副本（marketplace-x.y.z）。keep 是要保留的那一个文件夹名，没有就全清。
+export function removeStaleCopies(keep = null) {
+  const home = path.join(os.homedir(), ".quality-workflow");
+  const removed = [];
+  let names = [];
+  try { names = fs.readdirSync(home); } catch { return removed; }
+  for (const name of names) {
+    if (!/^marketplace-\d+\.\d+\.\d+$/.test(name) || name === keep) continue;
+    try { fs.rmSync(path.join(home, name), { recursive: true, force: true }); removed.push(name); } catch { /* 删不掉就留着 */ }
+  }
+  return removed;
+}
+
 // 比较版本号 a.b.c，a 比 b 新返回正数。
 export function compareVersion(a, b) {
   const pa = String(a).split(".").map((x) => parseInt(x, 10) || 0);

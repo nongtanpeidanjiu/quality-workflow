@@ -196,6 +196,55 @@ class WB(unittest.TestCase):
         r = subprocess.run([NODE, "--input-type=module", "-e", code], capture_output=True, text=True)
         self.assertEqual(r.stdout.strip(), "true,true,true,true", r.stderr)
 
+    def test_uninstall_needs_user_and_cleans_home(self):
+        # 用一个假的 WorkBuddy 程序，保证测试绝不会碰到真实的 WorkBuddy。
+        fake = os.path.join(self.home, "fake-engine.mjs")
+        with open(fake, "w") as f:
+            f.write("process.exit(0);\n")
+        env = dict(self.env, QFLOW_WB_ENGINE=fake, WORKBUDDY_CONFIG_DIR=os.path.join(self.home, ".workbuddy"))
+        qw = os.path.join(self.home, ".quality-workflow")
+        os.makedirs(os.path.join(qw, "marketplace-0.3.2"))
+        os.makedirs(os.path.join(qw, "python", "bin"))
+        with open(os.path.join(qw, "improvements.md"), "w") as f:
+            f.write("我的改进记录\n")
+        self.hook("UserPromptSubmit", env=env, prompt="你好")  # 留下心跳等运行记录
+        script = os.path.join(PLUGIN, "bin", "uninstall.mjs")
+        run = lambda *a: subprocess.run([NODE, script] + list(a), env=env, capture_output=True, text=True, cwd=self.root, stdin=subprocess.DEVNULL)
+        r = run()
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)  # 智能体不能自己卸载
+        r = run("--quote", "把这个插件卸载掉")
+        self.assertEqual(r.returncode, 2)  # 用户没说过这句话
+        self.assertTrue(os.path.isdir(os.path.join(qw, "marketplace-0.3.2")))
+        self.hook("UserPromptSubmit", env=env, prompt="把这个插件卸载掉吧，不用了")
+        r = run("--quote", "把这个插件卸载掉吧")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("卸载完成", r.stdout)
+        left = os.listdir(qw)
+        self.assertEqual(left, ["improvements.md"], left)  # 只留下用户自己的改进记录
+
+    def test_uninstall_keeps_python_for_codex(self):
+        fake = os.path.join(self.home, "fake-engine.mjs")
+        with open(fake, "w") as f:
+            f.write("process.exit(0);\n")
+        env = dict(self.env, QFLOW_WB_ENGINE=fake, WORKBUDDY_CONFIG_DIR=os.path.join(self.home, ".workbuddy"))
+        qw = os.path.join(self.home, ".quality-workflow")
+        os.makedirs(os.path.join(qw, "python", "bin"))
+        os.makedirs(os.path.join(qw, "codex"))
+        self.hook("UserPromptSubmit", env=env, prompt="卸载 WorkBuddy 上的质量插件")
+        r = subprocess.run([NODE, os.path.join(PLUGIN, "bin", "uninstall.mjs"), "--quote", "卸载 WorkBuddy 上的质量插件"], env=env, capture_output=True, text=True, cwd=self.root, stdin=subprocess.DEVNULL)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(sorted(os.listdir(qw)), ["codex", "python"])  # Codex 版还在用的不动
+
+    def test_stale_copies_removed(self):
+        qw = os.path.join(self.home, ".quality-workflow")
+        for v in ("0.2.0", "0.3.2", "0.4.2"):
+            os.makedirs(os.path.join(qw, "marketplace-" + v))
+        os.makedirs(os.path.join(qw, "python"))
+        code = 'import("%s").then(m => console.log(m.removeStaleCopies("marketplace-0.4.2").sort().join(",")))' % os.path.join(PLUGIN, "bin", "wb.mjs")
+        r = subprocess.run([NODE, "--input-type=module", "-e", code], env=self.env, capture_output=True, text=True)
+        self.assertEqual(r.stdout.strip(), "marketplace-0.2.0,marketplace-0.3.2", r.stderr)
+        self.assertEqual(sorted(os.listdir(qw)), ["marketplace-0.4.2", "python"])
+
     def test_heartbeat_and_doctor(self):
         r = subprocess.run([NODE, DOCTOR], env=self.env, capture_output=True, text=True)
         self.assertEqual(r.returncode, 1, r.stdout)

@@ -74,9 +74,15 @@ if not missing:
         shutil.rmtree(tmp_home, ignore_errors=True)
 
 # 4. 钩子是否被信任并在运行。Codex 规定插件的钩子要用户审核信任后才运行，插件更新后要重新信任。
+# 用户有意停用的不算故障：如实报告，告诉他怎么恢复。
+state, why = C.intent()
 alive, detail = C.hooks_alive(max_age=6 * 3600, events=("UserPromptSubmit", "SessionStart", "PreToolUse"))
-check("钩子在运行", alive, ("最近一次：" + detail) if alive else "没有收到当前版本钩子的运行记录（%s）。" % detail,
-      None if alive else C.TRUST_STEPS + "在新任务里再运行一次自检。")
+if state != "active":
+    check("钩子在运行", False, "%s，所以流程关卡现在不起作用。这是用户的决定，不是故障。" % why,
+          "想恢复时：运行 %s on ，并在 Codex 的 Settings > Hooks 和插件页面里把它打开。不想恢复就不用管。" % C.qflow_cmd())
+else:
+    check("钩子在运行", alive, ("最近一次：" + detail) if alive else "没有收到当前版本钩子的运行记录（%s）。" % detail,
+          None if alive else C.TRUST_STEPS + "在新任务里再运行一次自检。")
 
 # 5. 独立检查员
 agent = os.path.join(C.codex_home(), "agents", "independent-checker.toml")

@@ -84,6 +84,10 @@ if (!fromGithub) {
 }
 const rec = W.installedRecord();
 if (!rec) fail("安装命令执行了，但安装记录里没有找到插件。");
+
+// 清掉以前各个版本留下的本地副本。从 GitHub 安装时一份都不需要，本地安装时只留这一版。
+const stale = W.removeStaleCopies(fromGithub ? null : `marketplace-${ZIP_VERSION}`);
+if (stale.length) console.log(`  已清理旧版本留下的副本：${stale.join("、")}`);
 const VERSION = rec.version || ZIP_VERSION;
 
 // 4. 启用、打开自动更新

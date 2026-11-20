@@ -116,6 +116,13 @@ def cmd_direct(root, a):
     print("提醒：" + NOT_SMALL)
 
 
+def cmd_quote_check(root, a):
+    """核对一句话是不是用户说过的。卸载这类只能由用户决定的操作用它把关。"""
+    if L.find_user_quote(root, a.quote) is None:
+        die("没有找到用户说过这句话。")
+    print("核对通过。")
+
+
 def cmd_use(root, a):
     L.load_task(root, a.id)
     with open(os.path.join(L.flow_root(root), "active"), "w", encoding="utf-8") as f:
@@ -731,6 +738,7 @@ def build_parser():
     sub = p.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("start"); s.add_argument("--title", required=True); s.add_argument("--request", default=""); s.set_defaults(fn=cmd_start)
     s = sub.add_parser("direct"); s.add_argument("--restate", required=True); s.add_argument("--items", required=True); s.add_argument("--checked", default=""); s.add_argument("--quote", required=True); s.set_defaults(fn=cmd_direct)
+    s = sub.add_parser("quote-check"); s.add_argument("--quote", required=True); s.set_defaults(fn=cmd_quote_check)
     s = sub.add_parser("use"); s.add_argument("id"); s.set_defaults(fn=cmd_use)
     s = sub.add_parser("status"); s.set_defaults(fn=cmd_status)
     s = sub.add_parser("understand"); s.add_argument("--text", required=True); s.add_argument("--quote", required=True); s.set_defaults(fn=cmd_understand)

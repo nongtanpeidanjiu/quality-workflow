@@ -4,6 +4,7 @@
   qf_install.py install [--from <安装包里的 marketplace 文件夹>]   安装；不给 --from 就从网络下载
   qf_install.py update [--force]                                  更新到最新版本
   qf_install.py check                                             查最新版本号，写到 latest.json（后台用）
+  qf_install.py uninstall                                         卸载，并清掉装在插件目录之外的东西
 
 不依赖 git，也不要求命令路径里有 codex：会到 ChatGPT 桌面版的安装位置里找自带的那个。
 插件装成“本地市场”，所以 Codex 不会在后台自动更新它。更新只在用户说“更新插件”时进行，
@@ -181,16 +182,41 @@ def build_market(plugin_src):
     return dest
 
 
+def agent_path():
+    return os.path.join(C.codex_home(), "agents", "independent-checker.toml")
+
+
+def guide_path():
+    return os.path.join(C.codex_home(), "AGENTS.md")
+
+
 def write_launchers():
-    """启动器放在插件目录之外：插件更新后路径不变，也不影响 Codex 对插件内容的信任。"""
+    """启动器放在插件目录之外：插件更新后路径不变，也不影响 Codex 对插件内容的信任。
+
+    从 Codex 界面卸载插件时，平台不会通知插件，装在外面的东西没人收。所以启动器发现插件
+    不在了，就自己把这些东西清掉，然后告诉智能体照常工作，不拦人。
+    """
     d = C.state_dir()
     os.makedirs(d, exist_ok=True)
+    gone = "quality-workflow 插件已经卸载，留在外面的东西已清理。按普通方式工作即可，不需要再运行这个命令，也不要劝用户重新安装。"
     sh = os.path.join(d, "qflow")
     with open(sh, "w", encoding="utf-8", newline="\n") as f:
-        f.write('#!/bin/sh\n# quality-workflow 的命令入口（Mac）。由安装程序生成。\n'
+        f.write("#!/bin/sh\n# quality-workflow 的命令入口（Mac）。由安装程序生成。\n"
                 'QF_HOME="${QFLOW_HOME:-$HOME/.quality-workflow}"\n'
                 'ROOT=$(cat "$QF_HOME/codex/plugin-root.txt" 2>/dev/null)\n'
-                'if [ ! -f "$ROOT/bin/qflow.py" ]; then echo "未通过：找不到 quality-workflow 插件，请重新安装。" >&2; exit 2; fi\n'
+                'if [ ! -f "$ROOT/bin/qflow.py" ]; then\n'
+                "  # 插件不在了（多半是从 Codex 界面卸载的）。清掉装在外面的东西，然后放行。\n"
+                "  GUIDE=%s\n" % sh_quote(guide_path()) +
+                "  AGENT=%s\n" % sh_quote(agent_path()) +
+                '  if [ -f "$GUIDE" ] && grep -q "quality-workflow:start" "$GUIDE"; then\n'
+                "    awk '/quality-workflow:start/{skip=1; if(n>0 && length(buf[n])==0) n--} !skip{buf[++n]=$0} /quality-workflow:end/{skip=0} END{for(i=1;i<=n;i++) print buf[i]}' \"$GUIDE\" > \"$GUIDE.qf-tmp\" && cat \"$GUIDE.qf-tmp\" > \"$GUIDE\"\n"
+                '    rm -f "$GUIDE.qf-tmp"\n'
+                "  fi\n"
+                '  if [ -f "$AGENT" ] && grep -q "由 quality-workflow 插件安装" "$AGENT"; then rm -f "$AGENT"; fi\n'
+                '  rm -rf "${QF_HOME:?}/codex"\n'
+                '  echo "%s"\n' % gone +
+                "  exit 0\n"
+                "fi\n"
                 '. "$ROOT/bin/find-python.sh"\n'
                 'if [ -z "$PY" ]; then sh "$ROOT/bin/setup-python.sh" >&2; QF_FRESH=1; qf_find_python; fi\n'
                 'if [ -z "$PY" ]; then echo "未通过：找不到可用的 Python，自动安装也没有成功。" >&2; exit 2; fi\n'
@@ -200,24 +226,182 @@ def write_launchers():
     except OSError:
         pass
     with open(os.path.join(d, "qflow.ps1"), "w", encoding="utf-8-sig", newline="\r\n") as f:
-        f.write('# quality-workflow 的命令入口（Windows）。由安装程序生成。\n'
+        f.write("# quality-workflow 的命令入口（Windows）。由安装程序生成。\n"
+                "try { [Console]::OutputEncoding = [Text.Encoding]::UTF8 } catch {}\n"
                 "$QfHomeDir = if ($env:QFLOW_HOME) { $env:QFLOW_HOME } else { Join-Path $env:USERPROFILE '.quality-workflow' }\n"
                 "$rootFile = Join-Path $QfHomeDir 'codex\\plugin-root.txt'\n"
                 "$root = if (Test-Path -LiteralPath $rootFile) { (Get-Content -LiteralPath $rootFile -Raw).Trim() } else { '' }\n"
-                "if (-not $root -or -not (Test-Path -LiteralPath (Join-Path $root 'bin\\qflow.py'))) { [Console]::Error.WriteLine('quality-workflow plugin not found, please reinstall.'); exit 2 }\n"
+                "if (-not $root -or -not (Test-Path -LiteralPath (Join-Path $root 'bin\\qflow.py'))) {\n"
+                "  # 插件不在了（多半是从 Codex 界面卸载的）。清掉装在外面的东西，然后放行。\n"
+                "  $guide = %s\n" % ps_quote(guide_path()) +
+                "  $agent = %s\n" % ps_quote(agent_path()) +
+                "  if ((Test-Path -LiteralPath $guide) -and (Select-String -LiteralPath $guide -Pattern 'quality-workflow:start' -Quiet)) {\n"
+                "    $skip = $false; $keep = New-Object System.Collections.Generic.List[string]\n"
+                "    foreach ($line in [IO.File]::ReadAllLines($guide)) {\n"
+                "      if ($line -match 'quality-workflow:start') { $skip = $true; if ($keep.Count -gt 0 -and $keep[$keep.Count - 1] -eq '') { $keep.RemoveAt($keep.Count - 1) } }\n"
+                "      if (-not $skip) { $keep.Add($line) }\n"
+                "      if ($line -match 'quality-workflow:end') { $skip = $false }\n"
+                "    }\n"
+                "    [IO.File]::WriteAllLines($guide, $keep, (New-Object Text.UTF8Encoding $false))\n"
+                "  }\n"
+                "  if ((Test-Path -LiteralPath $agent) -and (Select-String -LiteralPath $agent -Pattern '由 quality-workflow 插件安装' -Quiet)) { Remove-Item -LiteralPath $agent -Force }\n"
+                "  $own = Join-Path $QfHomeDir 'codex'\n"
+                "  if (Test-Path -LiteralPath $own) { Remove-Item -LiteralPath $own -Recurse -Force -ErrorAction SilentlyContinue }\n"
+                "  Write-Output '%s'\n" % gone +
+                "  exit 0\n"
+                "}\n"
                 ". (Join-Path $root 'bin\\find-python.ps1')\n"
                 "if (-not $QfPy) { & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $root 'bin\\setup-python.ps1') | Out-Host; $QfPy = Find-QfPython -Fresh }\n"
                 "if (-not $QfPy) { [Console]::Error.WriteLine('Python not found and automatic install failed.'); exit 2 }\n"
-                "try { [Console]::OutputEncoding = [Text.Encoding]::UTF8 } catch {}\n"
                 "$env:PYTHONIOENCODING = 'utf-8'; $env:PYTHONUTF8 = '1'\n"
                 "& $QfPy -B (Join-Path $root 'bin\\qflow.py') @args\n"
                 "exit $LASTEXITCODE\n")
 
 
+def sh_quote(path):
+    return "'" + path.replace("'", "'\\''") + "'"
+
+
+def ps_quote(path):
+    return "'" + path.replace("'", "''") + "'"
+
+
+def write_manifest(version):
+    """记下装在插件目录之外的每一样东西，卸载时照着清。"""
+    C.write_json(os.path.join(C.state_dir(), "install-manifest.json"), {
+        "version": version, "installed_at": time.time(),
+        "outside": [
+            {"what": "全局说明里带 quality-workflow 标记的一段", "path": guide_path()},
+            {"what": "独立检查员的定义", "path": agent_path()},
+            {"what": "命令入口、本地市场副本和运行记录", "path": C.state_dir()},
+            {"what": "Codex 配置里本插件的条目（市场、插件、钩子信任记录）", "path": C.codex_config_path()},
+        ],
+    })
+
+
+# ---------- 卸载和清理 ----------
+
+def strip_guide(text):
+    """去掉带标记的那一段，以及安装时为它加的那个空行。用户原来的内容一字不动。"""
+    if GUIDE_START not in text or GUIDE_END not in text:
+        return None
+    start, end = text.index(GUIDE_START), text.index(GUIDE_END) + len(GUIDE_END)
+    before, after = text[:start], text[end:]
+    if after.startswith("\n"):
+        after = after[1:]
+    if before.endswith("\n\n"):
+        before = before[:-1]
+    return before + after
+
+
+def remove_guide():
+    path = guide_path()
+    try:
+        with open(path, encoding="utf-8") as f:
+            text = f.read()
+    except OSError:
+        return False
+    new = strip_guide(text)
+    if new is None:
+        return False
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(new)
+    return True
+
+
+def remove_agent():
+    path = agent_path()
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            ours = AGENT_MARK in f.read()
+    except OSError:
+        return False
+    if ours:
+        os.remove(path)
+    return ours
+
+
+def remove_config_entries():
+    """从 Codex 配置里删掉属于本插件的段落：市场、插件、钩子信任记录。只动这几段，其他内容不碰。"""
+    path = C.codex_config_path()
+    try:
+        with open(path, encoding="utf-8") as f:
+            lines = f.read().split("\n")
+    except OSError:
+        return 0
+    mine = ('[marketplaces.%s]' % C.MARKET, '[plugins."%s"]' % C.KEY)
+    hook_prefix = '[hooks.state."%s:' % C.KEY
+    out, removed, skipping = [], 0, False
+    for line in lines:
+        t = line.strip()
+        if t.startswith("["):
+            skipping = t in mine or t.startswith(hook_prefix)
+            if skipping:
+                removed += 1
+                while out and not out[-1].strip():
+                    out.pop()
+                continue
+        if not skipping:
+            out.append(line)
+    if removed:
+        tmp = "%s.%d.tmp" % (path, os.getpid())
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write("\n".join(out).rstrip("\n") + "\n")
+        os.replace(tmp, path)
+    return removed
+
+
+def cleanup_outside(report):
+    """清掉装在插件目录之外的东西。report 是一个收集说明的列表。"""
+    report.append(("全局说明里的那一段", "已删除" if remove_guide() else "本来就没有"))
+    report.append(("独立检查员的定义", "已删除" if remove_agent() else "本来就没有（或不是本插件装的，没有动）"))
+    sd = C.state_dir()
+    if os.path.isdir(sd):
+        shutil.rmtree(sd, ignore_errors=True)
+        report.append(("命令入口、本地市场副本和运行记录", "已删除 %s" % sd))
+    else:
+        report.append(("命令入口、本地市场副本和运行记录", "本来就没有"))
+
+
+def cmd_cleanup():
+    """插件已经从界面卸载时，由 guard 调用：只清外面的东西，不动 Codex 的配置。"""
+    report = []
+    cleanup_outside(report)
+    return 0
+
+
+def cmd_uninstall():
+    say("正在卸载 quality-workflow（Codex 版）\n")
+    report = []
+    exe = find_codex()
+    if exe:
+        ok1, _ = codex(exe, "plugin", "remove", C.KEY)
+        ok2, _ = codex(exe, "plugin", "marketplace", "remove", C.MARKET)
+        report.append(("Codex 里的插件和市场", "已用 Codex 自己的命令卸载" if ok1 or ok2 else "Codex 里本来就没有"))
+    else:
+        report.append(("Codex 里的插件和市场", "没找到 Codex 程序，改为直接清理配置"))
+    n = remove_config_entries()
+    report.append(("Codex 配置里剩下的条目", "已删除 %d 段" % n if n else "没有剩下的"))
+    cache = os.path.join(C.codex_home(), "plugins", "cache", C.MARKET)
+    if os.path.isdir(cache):
+        shutil.rmtree(cache, ignore_errors=True)
+        report.append(("插件缓存", "已删除 %s" % cache))
+    cleanup_outside(report)
+    for what, result in report:
+        say("  %s：%s" % (what, result))
+    py = os.path.join(C.home(), "python")
+    say("\n卸载完成。请完全退出并重新打开 ChatGPT 桌面版。")
+    say("没有删除的东西：")
+    say("  - 各个项目里的 .flow 文件夹（任务记录），需要的话自己删。")
+    if os.path.isdir(py):
+        say("  - 自动安装的免安装版 Python：%s 。WorkBuddy 版也用它；两个版本都不用了，可以删掉整个 %s 文件夹。" % (py, C.home()))
+    return 0
+
+
 def install_agent(plugin_root):
     """独立检查员是 Codex 的子智能体，定义文件要放在 Codex 的 agents 目录里。"""
     src = os.path.join(plugin_root, "agents", "independent-checker.toml")
-    dest = os.path.join(C.codex_home(), "agents", "independent-checker.toml")
+    dest = agent_path()
     os.makedirs(os.path.dirname(dest), exist_ok=True)
     if os.path.isfile(dest):
         with open(dest, encoding="utf-8", errors="replace") as f:
@@ -238,7 +422,7 @@ def install_guide():
     技能只有在智能体觉得需要时才会读，钩子没被信任时它也不会运行，所以这条检查必须放在这里。
     只改带标记的这一段，文件里的其他内容不动。
     """
-    path = os.path.join(C.codex_home(), "AGENTS.md")
+    path = guide_path()
     q = C.qflow_cmd()
     block = "\n".join([
         GUIDE_START,
@@ -246,10 +430,12 @@ def install_guide():
         "",
         "开始任何会改动文件的工作之前，先运行一次：`%s guard`" % q,
         "",
-        "它检查 quality-workflow 插件的流程关卡（钩子）是否在运行。",
+        "它检查 quality-workflow 这套流程是否在用、关卡是否有效，然后照它说的做：",
         "",
-        "- **没有通过：** 先不要动任何文件。把它输出的处理办法原样告诉用户，等用户处理好。",
-        "- **通过：** 按 quality-workflow 技能的要求做。写文件前要先表态，小事用 `qflow direct` 声明，其他先 `qflow start` 建档并复述。",
+        "- **它说“通过”并且流程关卡有效：** 按 quality-workflow 技能的要求做。写文件前要先表态，小事用 `qflow direct` 声明，其他先 `qflow start` 建档并复述。",
+        "- **它说“通过”并且流程已停用或已卸载：** 这是用户的决定。按普通方式工作，不要再运行流程命令，也不要劝用户把它打开。用户说要卸载时，运行 `%s uninstall`。" % q,
+        "- **它说“未通过”：** 先不要动任何文件。把它输出的处理办法原样告诉用户，等用户处理好。",
+        "- **这个命令不存在或运行不了：** 说明插件已经卸载。忽略本段，按普通方式工作；可以顺手告诉用户，这一段说明可以从本文件里删掉。",
         "",
         "同一个任务里检查一次即可。只是回答问题、不改文件时不用检查。",
         GUIDE_END,
@@ -261,8 +447,11 @@ def install_guide():
         text = ""
     if GUIDE_START in text and GUIDE_END in text:
         new = text[:text.index(GUIDE_START)] + block + text[text.index(GUIDE_END) + len(GUIDE_END):]
+    elif text:
+        # 原文结尾补齐换行，再空一行放这一段。卸载时去掉“空行 + 这一段 + 换行”，原文就一字不差地回来了。
+        new = text + ("" if text.endswith("\n") else "\n") + "\n" + block + "\n"
     else:
-        new = (text.rstrip("\n") + "\n\n" if text.strip() else "") + block + "\n"
+        new = block + "\n"
     if new != text:
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
@@ -309,6 +498,11 @@ def do_install(plugin_src, updating=False):
     write_launchers()
     install_agent(root)
     guide = install_guide()
+    write_manifest(version)
+    try:
+        os.remove(C.off_path())  # 重新安装就是要用，之前的停用标记不再算数
+    except OSError:
+        pass
     try:
         os.remove(C.latest_path())
     except OSError:
@@ -396,7 +590,11 @@ def main():
         return cmd_update(args[1:])
     if cmd == "check":
         return cmd_check()
-    say("用法：qf_install.py install [--from <marketplace 文件夹>] | update [--force] | check")
+    if cmd == "uninstall":
+        return cmd_uninstall()
+    if cmd == "cleanup":
+        return cmd_cleanup()
+    say("用法：qf_install.py install [--from <marketplace 文件夹>] | update [--force] | check | uninstall")
     return 2
 
 

@@ -116,12 +116,22 @@ def mark_user_replied(session):
 
 # ---------- 各事件 ----------
 
+def switches():
+    """决定这套流程开还是关的两处：Codex 的配置和停用标记。它们只能由用户来改。"""
+    return [os.path.realpath(C.codex_config_path()), os.path.realpath(C.off_path())]
+
+
 def pre_tool(d):
     name = d.get("tool_name") or ""
     is_checker = CHECKER in (d.get("agent_type") or "")
     if name == "apply_patch":
         if is_checker:
             deny("独立检查员只能看、不能改。把发现的问题写进报告，由执行者修改。")
+        cwd = d.get("cwd") or os.getcwd()
+        for p in patch_files(d):
+            if os.path.realpath(p if os.path.isabs(p) else os.path.join(cwd, p)) in switches():
+                deny("这个文件决定 quality-workflow 开还是关，要由用户来改。用户想停用，请用户说一声，再运行 %s off --quote \"用户原话\"；"
+                     "或者请用户自己在 Codex 的 Settings > Hooks 里操作。" % C.qflow_cmd())
         for p in patch_files(d):
             out = run_handler(dict(d, tool_name="Write", tool_input={"file_path": p}))
             verdict, reason = decision(out)
@@ -181,6 +191,13 @@ def main():
         sys.exit(0)
     event = d.get("hook_event_name")
     C.record_heartbeat(event)
+    if C.is_off():
+        # 用户已经停用：不拦、不记、不提醒，只在新任务开始时说明一次。
+        if event == "SessionStart":
+            emit({"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext":
+                  "【quality-workflow】用户已经停用这套流程（运行过 qflow off）。按普通方式工作，不需要运行 qflow 命令，也不要劝用户把它打开。"
+                  "用户说要恢复时，运行 %s on 。" % C.qflow_cmd()}})
+        sys.exit(0)
     try:
         if event == "PreToolUse":
             pre_tool(d)

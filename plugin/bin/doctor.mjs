@@ -26,7 +26,7 @@ if (python) {
 // 2. 插件文件
 const required = [
   ".codebuddy-plugin/plugin.json", "hooks/hooks.json", "hooks/hook_handler.py", "bin/hook.mjs", "bin/qflow.mjs", "bin/lib.mjs",
-  "bin/setup-python.mjs", "scripts/flow.py", "scripts/flowlib.py", "agents/independent-checker.md", "skills/quality-workflow/SKILL.md",
+  "bin/setup-python.mjs", "bin/wb.mjs", "bin/uninstall.mjs", "scripts/flow.py", "scripts/flowlib.py", "agents/independent-checker.md", "skills/quality-workflow/SKILL.md",
   "skills/quality-workflow/assets/任务单模板.md",
 ];
 const missing = required.filter((f) => !fs.existsSync(path.join(PLUGIN_ROOT, f)));

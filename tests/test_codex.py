@@ -231,6 +231,143 @@ class Guard(Base):
         self.assertFalse(os.path.isdir(os.path.join(self.root, ".flow")))  # 自检不在用户项目里留东西
 
 
+KEY = "quality-workflow@quality-workflow-codex"
+EVENTS = ["pre_tool_use", "post_tool_use", "session_start", "user_prompt_submit", "subagent_start", "subagent_stop", "stop"]
+
+
+def config_text(plugin=True, plugin_enabled=True, hooks_off=(), features_hooks=None, trusted=True):
+    """拼一份 Codex 的 config.toml：别的设置加上本插件的条目。"""
+    out = ['model = "x"', "", "[mcp_servers.other]", 'command = "y"', ""]
+    if features_hooks is not None:
+        out += ["[features]", "hooks = %s" % ("true" if features_hooks else "false"), ""]
+    if plugin:
+        out += ["[marketplaces.quality-workflow-codex]", 'source_type = "local"', 'source = "/x"', "",
+                '[plugins."%s"]' % KEY, "enabled = %s" % ("true" if plugin_enabled else "false"), ""]
+        for e in EVENTS:
+            out.append('[hooks.state."%s:hooks/hooks.json:%s:0:0"]' % (KEY, e))
+            if trusted:
+                out += ['trusted_hash = "sha256:aa"', 'trusted_content_hash = "sha256:bb"']
+            if e in hooks_off:
+                out.append("enabled = false")
+            out.append("")
+    out += ['[plugins."someone-else@market"]', "enabled = true", ""]
+    return "\n".join(out)
+
+
+class Intent(Base):
+    """钩子没在运行时，要分清是用户有意关的，还是出了故障。起因是 2026-11-19 的事故。"""
+
+    def config(self, **kw):
+        with open(os.path.join(self.codex_home, "config.toml"), "w", encoding="utf-8") as f:
+            f.write(config_text(**kw))
+
+    def assert_passes_quietly(self, out):
+        self.assertIn("通过", out)
+        self.assertIn("按普通方式工作", out)
+        self.assertNotIn("未通过", out)
+        self.assertNotIn("信任", out)  # 不劝用户把它打开
+
+    def test_incident_all_hooks_turned_off_by_user(self):
+        # 事故现场：七个钩子全部被用户关掉，插件仍是启用，上一次心跳在 761 分钟前
+        self.hook("PreToolUse", tool_name="Bash", tool_input={"command": "ls"})
+        hb = os.path.join(self.state, "hook-heartbeat.json")
+        data = json.load(open(hb))
+        for v in data.values():
+            v["ts"] -= 761 * 60
+        json.dump(data, open(hb, "w"))
+        self.config(hooks_off=EVENTS)
+        code, out = self.qflow("guard")
+        self.assertEqual(code, 0, out)
+        self.assert_passes_quietly(out)
+        self.assertEqual(self.qflow("start", "--title", "x")[0], 0)  # 流程命令也不再被拦
+
+    def test_plugin_disabled_or_hooks_feature_off(self):
+        self.config(plugin_enabled=False)
+        code, out = self.qflow("guard")
+        self.assertEqual(code, 0, out)
+        self.assert_passes_quietly(out)
+        self.config(features_hooks=False)
+        code, out = self.qflow("guard")
+        self.assertEqual(code, 0, out)
+        self.assert_passes_quietly(out)
+        self.config(hooks_off=["pre_tool_use"])  # 只关了一个也算用户的决定
+        self.assertEqual(self.qflow("guard")[0], 0)
+
+    def test_enabled_but_not_running_still_stops(self):
+        # 插件和钩子都开着却没有运行（刚装好还没信任）：这才是要停下的情况
+        self.config()
+        code, out = self.qflow("guard")
+        self.assertEqual(code, 1, out)
+        self.assertIn("未通过", out)
+        self.assertIn("暂时不想用", out)  # 给了第二条出路
+        self.assertEqual(self.qflow("start", "--title", "x")[0], 2)
+        self.config(trusted=False)
+        self.assertEqual(self.qflow("guard")[0], 1)
+
+    def test_uninstalled_from_ui_passes_and_cleans_up(self):
+        os.makedirs(os.path.join(self.codex_home, "agents"))
+        shutil.copy(os.path.join(CODEX, "agents", "independent-checker.toml"), os.path.join(self.codex_home, "agents"))
+        guide = os.path.join(self.codex_home, "AGENTS.md")
+        with open(guide, "w", encoding="utf-8") as f:
+            f.write("用户自己的说明\n\n<!-- quality-workflow:start（由 quality-workflow 插件维护，卸载插件时可以整段删除） -->\n先运行 guard\n<!-- quality-workflow:end -->\n")
+        os.makedirs(self.state, exist_ok=True)
+        open(os.path.join(self.state, "qflow"), "w").close()
+        self.config(plugin=False)  # 配置里已经没有本插件
+        code, out = self.qflow("guard")
+        self.assertEqual(code, 0, out)
+        self.assert_passes_quietly(out)
+        self.assertEqual(open(guide, encoding="utf-8").read().strip(), "用户自己的说明")
+        self.assertFalse(os.path.exists(os.path.join(self.codex_home, "agents", "independent-checker.toml")))
+        self.assertFalse(os.path.exists(self.state))
+
+    def test_off_needs_user_words_then_gates_stop(self):
+        target = os.path.join(self.root, "a.md")
+        self.assertEqual(self.write(target)[0], "deny")
+        code, out = self.qflow("off")
+        self.assertEqual(code, 2, out)  # 智能体不能自己停用
+        code, out = self.qflow("off", "--quote", "这次先别用质量流程了")
+        self.assertEqual(code, 2, out)  # 用户没说过这句话
+        self.assertEqual(self.write(target)[0], "deny")
+        self.hook("UserPromptSubmit", prompt="这次先别用质量流程了，直接做")
+        code, out = self.qflow("off", "--quote", "这次先别用质量流程了")
+        self.assertEqual(code, 0, out)
+        self.assertIn("已停用", out)
+        self.assertEqual(self.write(target)[0], None)  # 不再拦
+        self.assertEqual(self.hook("PreToolUse", tool_name="Bash", tool_input={"command": "git push --force origin main"}), {})
+        ctx = self.hook("SessionStart", source="startup")["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("已经停用", ctx)
+        self.assertNotIn("doctor", ctx)
+        code, out = self.qflow("guard")
+        self.assertEqual(code, 0, out)
+        self.assert_passes_quietly(out)
+        code, out = self.qflow("doctor")
+        self.assertIn("用户的决定", out)
+        self.assertEqual(self.qflow("on")[0], 0)
+        self.assertEqual(self.write(target)[0], "deny")  # 恢复后又拦
+
+    def test_quote_only_needed_while_gates_work(self):
+        # 只有关卡真的在起作用时才要原话。用户关了钩子、或钩子还没被信任时，用户的话本来就记不下来
+        self.config()
+        self.assertEqual(self.qflow("off")[0], 0)   # 刚装好、钩子没运行：关卡不起作用，放行
+        self.assertEqual(self.qflow("on")[0], 0)
+        self.hook("PreToolUse", tool_name="Bash", tool_input={"command": "ls"})   # 钩子在运行
+        self.assertEqual(self.qflow("off")[0], 2)   # 关卡在起作用：智能体不能自己停用
+        self.config(hooks_off=EVENTS)
+        code, out = self.qflow("off")
+        self.assertEqual(code, 0, out)              # 用户关了钩子：放行
+
+    def test_guard_when_off_still_points_to_uninstall(self):
+        self.config(hooks_off=EVENTS)
+        out = self.qflow("guard")[1]
+        self.assertIn("qflow uninstall", out)       # 不能让智能体以为连卸载命令都不能用
+
+    def test_agent_cannot_edit_the_switches(self):
+        verdict, reason = self.write(os.path.join(self.codex_home, "config.toml"))
+        self.assertEqual(verdict, "deny")
+        self.assertIn("要由用户来改", reason)
+        self.assertEqual(self.write(os.path.join(self.state, "off.json"))[0], "deny")
+
+
 @unittest.skipIf(os.name == "nt", "shell 脚本只在 Mac 上测")
 class Shell(Base):
     def no_python_env(self):
@@ -313,6 +450,66 @@ class Install(Base):
         log = json.load(open(os.path.join(self.codex_home, "fake-state.json")))["log"]
         self.assertIn(["plugin", "remove", "quality-workflow@quality-workflow-codex"], log)
 
+    GUIDE_BEFORE = "用户自己的说明\n"
+    GUIDE_AFTER = GUIDE_BEFORE   # 卸载后应当和安装前一字不差
+
+    def prepare_installed(self):
+        guide = os.path.join(self.codex_home, "AGENTS.md")
+        with open(guide, "w", encoding="utf-8") as f:
+            f.write(self.GUIDE_BEFORE)
+        self.assertEqual(self.run_install("install", "--from", self.market)[0], 0)
+        with open(os.path.join(self.codex_home, "config.toml"), "w", encoding="utf-8") as f:
+            f.write(config_text())
+        return guide, os.path.join(self.codex_home, "agents", "independent-checker.toml"), os.path.join(self.installed(), VERSION)
+
+    def test_install_writes_manifest_and_conditional_guide(self):
+        guide, agent, root = self.prepare_installed()
+        manifest = json.load(open(os.path.join(self.state, "install-manifest.json"), encoding="utf-8"))
+        paths = [x["path"] for x in manifest["outside"]]
+        self.assertIn(guide, paths)
+        self.assertIn(agent, paths)
+        self.assertIn(self.state, paths)
+        text = open(guide, encoding="utf-8").read()
+        self.assertIn("命令不存在", text)   # 残留下来也不会拦人
+        self.assertIn("已停用或已卸载", text)
+        os.makedirs(self.state, exist_ok=True)
+        open(os.path.join(self.state, "off.json"), "w").write("{}")
+        self.assertEqual(self.run_install("install", "--from", self.market)[0], 0)
+        self.assertFalse(os.path.exists(os.path.join(self.state, "off.json")))  # 重新安装就是要用
+
+    def test_uninstall_needs_user_and_leaves_nothing(self):
+        guide, agent, root = self.prepare_installed()
+        qflow = [sys.executable, "-B", os.path.join(root, "bin", "qflow.py")]
+        self.hook("PreToolUse", tool_name="Bash", tool_input={"command": "ls"})  # 钩子在运行，关卡起作用
+        r = subprocess.run(qflow + ["uninstall"], env=self.env, capture_output=True, cwd=self.root, stdin=subprocess.DEVNULL)
+        self.assertEqual(r.returncode, 2)  # 智能体不能自己卸载
+        self.assertTrue(os.path.isfile(agent))
+        self.hook("UserPromptSubmit", prompt="把这个质量插件卸载掉吧")
+        r = subprocess.run(qflow + ["uninstall", "--quote", "把这个质量插件卸载掉吧"], env=self.env, capture_output=True, cwd=self.root, stdin=subprocess.DEVNULL)
+        out = (r.stdout + r.stderr).decode("utf-8", "replace")
+        self.assertEqual(r.returncode, 0, out)
+        self.assertIn("卸载完成", out)
+        self.assertEqual(open(guide, encoding="utf-8").read(), self.GUIDE_AFTER)  # 和安装前一字不差
+        self.assertFalse(os.path.exists(agent))
+        self.assertFalse(os.path.exists(self.state))
+        self.assertFalse(os.path.exists(os.path.join(self.codex_home, "plugins", "cache", "quality-workflow-codex")))
+        config = open(os.path.join(self.codex_home, "config.toml"), encoding="utf-8").read()
+        self.assertNotIn("quality-workflow", config)
+        for kept in ('model = "x"', "[mcp_servers.other]", '[plugins."someone-else@market"]'):
+            self.assertIn(kept, config)  # 别人的配置原样保留
+
+    def test_launcher_cleans_up_after_ui_uninstall(self):
+        guide, agent, root = self.prepare_installed()
+        shutil.rmtree(os.path.join(self.codex_home, "plugins", "cache", "quality-workflow-codex"))  # 相当于从界面卸载
+        r = subprocess.run([os.path.join(self.state, "qflow"), "guard"], env=self.env, capture_output=True, cwd=self.root)
+        out = (r.stdout + r.stderr).decode("utf-8", "replace")
+        self.assertEqual(r.returncode, 0, out)   # 不拦人
+        self.assertIn("已经卸载", out)
+        self.assertIn("按普通方式工作", out)
+        self.assertEqual(open(guide, encoding="utf-8").read(), self.GUIDE_AFTER)  # 和安装前一字不差
+        self.assertFalse(os.path.exists(agent))
+        self.assertFalse(os.path.exists(self.state))
+
     def test_install_without_codex_explains(self):
         env = dict(self.env, QFLOW_CODEX="", PATH="/usr/bin:/bin")
         code, out = self.run_install("install", "--from", self.market, env=env)
@@ -391,6 +588,18 @@ class Install(Base):
         code, out = self.run_install("install")
         self.assertEqual(code, 0, out)
         self.assertTrue(os.path.isfile(os.path.join(self.installed(), "99.3.0", "bin", "qflow.py")))
+
+
+class GuideEndings(Install):
+    """用户的全局说明以空行结尾（你电脑上的就是这样）。"""
+    GUIDE_BEFORE = "用户自己的说明\n\n"
+    GUIDE_AFTER = GUIDE_BEFORE
+
+
+class GuideNoNewline(Install):
+    """用户的全局说明结尾没有换行。卸载后补上一个换行，这是唯一允许的差别。"""
+    GUIDE_BEFORE = "用户自己的说明"
+    GUIDE_AFTER = "用户自己的说明\n"
 
 
 class Sync(unittest.TestCase):

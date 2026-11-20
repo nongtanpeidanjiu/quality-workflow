@@ -154,7 +154,7 @@ ChatGPT 桌面版的 Work 模式和 Chat 模式不支持：前者在云端运行
 
 下面是 WorkBuddy 版的安装方法。**Codex 版**见本节末尾。
 
-1. 从 [Releases](../../releases) 下载 `quality-workflow-0.4.1.zip`。
+1. 从 [Releases](../../releases) 下载 `quality-workflow-0.4.2.zip`。
 2. 在 WorkBuddy 里新建一个任务，把压缩包拖进对话框，发送：
 
 ```
@@ -173,7 +173,7 @@ ChatGPT 桌面版的 Work 模式和 Chat 模式不支持：前者在云端运行
 
 ### Codex 版（ChatGPT 桌面版的 Codex 模式）
 
-1. 从 [Releases](../../releases) 下载 `quality-workflow-codex-0.4.1.zip`。
+1. 从 [Releases](../../releases) 下载 `quality-workflow-codex-0.4.2.zip`。
 2. 在 ChatGPT 桌面版的 Codex 里新建一个任务，把压缩包拖进对话框，发送：
 
 ```
@@ -189,6 +189,8 @@ ChatGPT 桌面版的 Work 模式和 Chat 模式不支持：前者在云端运行
 - **钩子要你手动信任，** 插件每次更新后还要重新信任。没信任时，智能体会在开工前检查出来并停下，不会在关卡失效的情况下干活。
 - **不在后台自动更新。** 有新版本时提醒你，你说“更新插件”才更新。
 - **难以收回的动作没有弹窗。** 程序会先拒绝，智能体把后果告诉你，你同意后再执行一次才放行。
+
+不想用的时候，把钩子关掉或停用插件即可，智能体会按普通方式工作，不会被拦。卸载时对智能体说一声，它会把装在插件目录之外的东西一起清干净。
 
 详见 [Codex 版安装说明](docs/codex/安装说明.md)。
 

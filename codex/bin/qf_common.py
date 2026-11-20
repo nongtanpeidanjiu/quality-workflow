@@ -120,9 +120,80 @@ def hooks_alive(max_age=HEARTBEAT_FRESH, events=None):
 
 
 TRUST_STEPS = (
-    "请用户这样做：打开 ChatGPT 桌面版，进入 Settings > Hooks（或点输入框附近的“Review hooks”），找到 Quality Workflow，"
-    "把它的钩子全部信任并打开，然后新建一个任务。插件每次更新后都要重新信任一次，这是 Codex 的安全规定。"
+    "请用户二选一。要用这套流程：打开 ChatGPT 桌面版，进入 Settings > Hooks（或点输入框附近的“Review hooks”），找到 Quality Workflow，"
+    "把它的钩子全部信任并打开，然后新建一个任务（插件每次更新后都要重新信任一次，这是 Codex 的安全规定）。"
+    "暂时不想用：在 Settings > Hooks 里把 Quality Workflow 的钩子关掉，或者在插件页面停用它，之后智能体就按普通方式工作，不会再被拦。"
 )
+
+
+# ---------- 用户的意图：停用、卸载，还是正在用 ----------
+# 钩子没在运行有几种原因。用户有意关掉或卸载的，要尊重，不能当成故障把活拦下。
+# 判断只看用户本人才会做的事：Codex 界面里的开关（写在 config.toml 里），或者经过核对的 qflow off。
+
+def off_path():
+    return os.path.join(state_dir(), "off.json")
+
+
+def is_off():
+    return os.path.isfile(off_path())
+
+
+def codex_config_path():
+    return os.path.join(codex_home(), "config.toml")
+
+
+def read_codex_state():
+    """从 Codex 的配置里读出本插件的状态。读不到配置时返回 None（当作情况不明）。
+
+    返回 {"configured": 插件条目是否存在, "plugin_enabled": 插件是否启用,
+          "features_hooks": 钩子功能是否开着, "disabled_hooks": [被用户关掉的钩子事件名]}
+    """
+    try:
+        with open(codex_config_path(), encoding="utf-8") as f:
+            lines = f.read().splitlines()
+    except OSError:
+        return None
+    plugin_sec = 'plugins."%s"' % KEY
+    hook_prefix = 'hooks.state."%s:' % KEY
+    state = {"configured": False, "plugin_enabled": True, "features_hooks": True, "disabled_hooks": []}
+    section = ""
+    for line in lines:
+        t = line.strip()
+        if t.startswith("[") and t.endswith("]"):
+            section = t.strip("[]").strip()
+            if section == plugin_sec:
+                state["configured"] = True
+            continue
+        if "=" not in t or t.startswith("#"):
+            continue
+        key, value = [x.strip() for x in t.split("=", 1)]
+        value = value.split("#", 1)[0].strip().lower()
+        if section == plugin_sec and key == "enabled":
+            state["plugin_enabled"] = value != "false"
+        elif section == "features" and key in ("hooks", "codex_hooks") and value == "false":
+            state["features_hooks"] = False
+        elif section.startswith(hook_prefix) and key == "enabled" and value == "false":
+            parts = section[len(hook_prefix):].rstrip('"').split(":")
+            state["disabled_hooks"].append(parts[-3] if len(parts) >= 3 else section)
+    return state
+
+
+def intent():
+    """返回 (状态, 给人看的说明)。状态是 off / uninstalled / plugin_disabled / hooks_disabled / active 之一。"""
+    if is_off():
+        return "off", "用户已经停用这套流程（运行过 qflow off）"
+    st = read_codex_state()
+    if st is None:
+        return "active", ""
+    if not st["configured"]:
+        return "uninstalled", "插件已经从 Codex 里卸载"
+    if not st["plugin_enabled"]:
+        return "plugin_disabled", "用户在 Codex 里停用了这个插件"
+    if not st["features_hooks"]:
+        return "hooks_disabled", "用户在 Codex 里关掉了钩子功能"
+    if st["disabled_hooks"]:
+        return "hooks_disabled", "用户在 Codex 里关掉了这个插件的钩子（%s）" % "、".join(sorted(set(st["disabled_hooks"])))
+    return "active", ""
 
 
 # ---------- 自检记录 ----------
