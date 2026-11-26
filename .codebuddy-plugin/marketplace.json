@@ -7,7 +7,7 @@
     {
       "name": "quality-workflow",
       "source": "./plugin",
-      "version": "0.4.2",
+      "version": "0.4.3",
       "description": "先找出决定结果的关键项，先验证再使用，做完逐项核对证据，如实交付。Mac 和 Windows 通用。"
     }
   ]

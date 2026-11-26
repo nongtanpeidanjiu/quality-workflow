@@ -1267,5 +1267,70 @@ class Record(Base):
         self.assertEqual(self.decision(self.pre_write(record)), "deny")
 
 
+class Stuck043(Base):
+    """2026-11-26 的事故：清单检查 8 轮不通过，成果一个字没写出来。"""
+
+    def test_agent_items_need_not_be_verified_before_confirm(self):
+        # K2 由智能体验证，确认前保持“待验证”完全可以；status 要把这一点说清楚
+        self.start()
+        out = self.q("status")
+        self.assertIn("确认前要完成", out)
+        self.assertIn("用到它的步骤之前", out)  # 由智能体验证的，可以留到用的时候
+        self.assertIn("K2", out.split("确认前不用完成的")[1])
+        self.q("state", "待确认")
+        self.say("可以，就这样做")
+        self.q("confirm", "--quote", "可以，就这样做")
+        self.assertEqual(self.state()["status"], "执行中")
+        self.assertNotEqual(self.state()["items"][1].get("status"), "已验证")
+
+    def test_repeated_checklist_failures_go_to_user(self):
+        self.start(listcheck=False)
+        out = self.q("check", "--report", self.report(verdict="不通过", ctype="清单"))
+        self.assertNotIn("连续", out)
+        out = self.q("check", "--report", self.report(verdict="不通过", ctype="清单"))
+        self.assertIn("连续 2 次", out)
+        self.assertIn("告诉用户", out)
+        self.assertIn("--user-ruling", out)
+        out = self.q("state", "待确认", ok=False)
+        self.assertIn("--user-ruling", out)
+        # 智能体不能自己裁定：要用户在这之后说的话
+        self.q("check", "--user-ruling", "--quote", "对，就按你说的理解来做", ok=False)
+        self.say("检查员说的那几条交付时再看，先按现在的清单开工")
+        out = self.q("check", "--user-ruling", "--quote", "检查员说的那几条交付时再看，先按现在的清单开工")
+        self.assertIn("交付检查", out)
+        self.q("state", "待确认")
+        sheet = open(os.path.join(self.tdir(), "进度记录.md"), encoding="utf-8").read()
+        self.assertIn("用户裁定", sheet)
+
+    def test_user_ruling_on_checklist_needs_a_failed_check(self):
+        self.start()
+        self.say("先按现在的清单开工")
+        self.q("check", "--user-ruling", "--quote", "先按现在的清单开工", ok=False)
+
+    def test_check_without_report_records_pending_one(self):
+        self.start(listcheck=False)
+        self.report(ctype="清单")
+        out = self.q("check")
+        self.assertIn("清单检查已记录：通过", out)
+        self.assertIn("qflow state 待确认", out)   # 告诉下一步
+        out = self.q("check", ok=False)
+        self.assertIn("没有待记录的检查报告", out)
+
+    def test_quote_may_join_several_answers(self):
+        self.q("start", "--title", "guide", "--request", "写个指南")
+        self.write_sheet()
+        self.hook("PostToolUse", tool_name="AskUserQuestion", tool_input={}, tool_response=" · 通讯录权限 → 我现在去开权限，按全自动做\n · 推送内容 → 纪要全文")
+        self.q("understand", "--text", RESTATE, "--quote", "我现在去开权限，按全自动做；纪要全文")
+        out = self.q("understand", "--text", RESTATE, "--quote", "通讯录权限：我现在去开权限，按全自动做；纪要全文", ok=False)
+        self.assertIn("分号", out)
+
+    def test_write_block_tells_the_way_out(self):
+        self.start()
+        verdict = self.pre_write(os.path.join(self.root, "docs", "guide.md"))
+        reason = verdict["hookSpecificOutput"]["permissionDecisionReason"]
+        self.assertIn("qflow status", reason)
+        self.assertIn("不必在确认前", reason)
+
+
 if __name__ == "__main__":
     unittest.main()

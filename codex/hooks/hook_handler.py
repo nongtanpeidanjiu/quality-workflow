@@ -68,7 +68,8 @@ def write_rule(root, st, path, cwd, cfg=None):
         status = st.get("resume_to") or "执行中"
     if status in L.LOCKED_WRITE:
         if status in ("澄清中", "待确认"):
-            return "确认页还没有说定（%s），现在只能写任务单、drafts/ 小样和 evidence/ 里的检验记录。说定后再动成果。" % st["status"]
+            return ("确认页还没有说定（%s），现在只能写任务单、drafts/ 小样和 evidence/ 里的检验记录。说定后再动成果。"
+                    "要往下走：运行 qflow status，它会列出确认前还差什么。由你验证的关键项不必在确认前完成，在用到它的步骤之前验证即可。" % st["status"])
         return "任务处于 %s，成果已送检，不能再改。需要修改请用 qflow change。" % st["status"]
     if rel is None:
         return "这个路径在项目之外，不在已确认的范围内：%s。要改就先走变更流程。" % real

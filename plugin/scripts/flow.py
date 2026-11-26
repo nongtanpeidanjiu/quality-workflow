@@ -149,12 +149,51 @@ def cmd_status(root, a):
     diffs = L.diff_fingerprints(root, st) if st["status"] not in ("澄清中", "待确认") else {}
     if diffs:
         print("未记录的差异：" + "、".join("%s（%s）" % kv for kv in diffs.items()))
+    if st["status"] in ("澄清中", "待确认"):
+        print(before_confirm(root, st))
     print("交付检查有效：%s" % ("是" if L.has_valid_pass(root, st) else "否"))
     uncaptured = [c["path"] for c in st.get("captured", []) if not c.get("used")]
     if uncaptured:
         print("待记录的检查报告：" + "、".join(uncaptured))
     if st.get("unverified") or st.get("stop_cap_hit"):
         print("注意：任务目前未核验。")
+
+
+def before_confirm(root, st):
+    """说清楚请用户确认之前到底要完成什么。智能体常以为要把所有关键项都验证完，结果在确认前空转。"""
+    if not st.get("items"):
+        # 进入待确认之前，关键项还没同步进状态，先从任务单读一遍（只读，不保存）
+        try:
+            L.sync_items(st, L.parse_items(L.sections(L.read_sheet(root, st)).get("关键项清单")))
+        except Exception:  # noqa: BLE001 任务单还没写完时读不出来，照样给出其余提示
+            pass
+    pend = L.pending_decisive(root, st)
+    user_pend = [i for i in pend if i.get("verifier") == "用户"]
+    agent_pend = [i for i in pend if i.get("verifier") != "用户"]
+    lines = ["确认前要完成的："]
+    lines.append("  - 开工前的复述确认：%s" % ("已完成" if st.get("understood") else "还没有"))
+    last = L.latest_check(st, "清单")
+    lines.append("  - 清单检查通过：%s" % ("已通过" if last and last.get("verdict") in ("通过", "用户裁定") else ("最近一次是“%s”" % last.get("verdict") if last else "还没做")))
+    lines.append("  - 由用户决定的决定性的项，要有用户原话（可以在确认时一并拿到）：%s" % (names(user_pend) if user_pend else "都已有"))
+    if agent_pend:
+        lines.append("确认前不用完成的：由智能体验证的 %s，保持“待验证”即可，在用到它的步骤之前验证。不要为了确认去提前标成已验证或豁免。" % names(agent_pend))
+    return "\n".join(lines)
+
+
+def checklist_fail_streak(st):
+    """最近连续几次清单检查没有通过。"""
+    n = 0
+    for c in reversed([c for c in st.get("checks", []) if c.get("type") == "清单"]):
+        if c.get("verdict") in ("通过", "用户裁定"):
+            break
+        n += 1
+    return n
+
+
+def ask_user_about_checklist(n):
+    return ("清单检查已经连续 %d 次没有通过。不要再自己改一轮：把检查员报告里的阻断理由原文告诉用户，由用户决定。"
+            "用户要你按报告改，就改；用户同意按现在的清单开工，就运行 qflow check --user-ruling --quote \"用户的原话\"，"
+            "检查员提出的问题会带到交付检查里再核对。" % n)
 
 
 def sync_from_sheet(root, st, approved=False):
@@ -175,8 +214,12 @@ def enter_ready(root, st, a):
     last = L.latest_check(st, "清单")
     if not last:
         die("请用户确认前，要先让独立检查员检查关键项清单，并用 qflow check 记录。")
-    if last.get("verdict") != "通过":
-        die("最近一次清单检查的结论是“%s”。按报告改好任务单后，要让检查员重新检查，通过了才能往下走。" % last.get("verdict"))
+    if last.get("verdict") not in ("通过", "用户裁定"):
+        n = checklist_fail_streak(st)
+        if n >= 2:
+            die(ask_user_about_checklist(n))
+        die("最近一次清单检查的结论是“%s”。按报告改好任务单后，要让检查员重新检查，通过了才能往下走。"
+            "注意：清单检查只看清单本身；由你验证的项在确认前保持待验证即可，不需要提前验证。" % last.get("verdict"))
     st["direction_sig"] = L.direction_signature(parsed)
     st["page_sig"] = L.page_signature(parsed)
     transition(st, "待确认", a.reason or "")
@@ -515,9 +558,21 @@ def parse_report(text):
 
 def cmd_check(root, a):
     st = get_task(root, a)
+    if a.user_ruling and st["status"] == "澄清中":
+        last = L.latest_check(st, "清单")
+        if not last or last.get("verdict") in ("通过", "用户裁定"):
+            die("只有清单检查没有通过时，才需要用户裁定。")
+        L.verify_quote(root, a.quote, last.get("ts", st["last_transition"]))
+        record_check(root, st, "清单", "用户裁定", "用户裁定", last.get("report"))
+        st["checks"][-1]["quote"] = a.quote
+        st.setdefault("carried_checklist_reports", []).append(last.get("report"))
+        L.save_task(root, st)
+        print("已记录：用户裁定按现在的清单开工（原话：%s）。检查员报告 %s 里的问题，交付检查时要逐条再核对，交付说明里也要写明。"
+              "下一步：qflow state 待确认。" % (a.quote, last.get("report") or ""))
+        return
     if a.user_ruling:
         if st["status"] != "待关闭":
-            die("用户裁定只用于待关闭的任务。")
+            die("用户裁定用于两种情况：清单检查没有通过时（任务在澄清中），或者交付检查之后（任务在待关闭）。当前是 %s。" % st["status"])
         L.verify_quote(root, a.quote, st["last_transition"])
         if not a.issues:
             die("用户裁定要写明问题编号（--issues）。")
@@ -535,7 +590,13 @@ def cmd_check(root, a):
         finish_overall(root, st, "用户裁定通过", {})
         return
     if not a.report:
-        die("需要 --report <报告路径>。")
+        pending = [c for c in st.get("captured", []) if not c.get("used")]
+        if not pending:
+            die("没有待记录的检查报告。先调用独立检查员；它的报告会被自动保存，然后再运行 qflow check。")
+        # 只认最新的一份，更早没记录的那些已经过时
+        for c in pending[:-1]:
+            c["used"] = True
+        a.report = pending[-1]["path"]
     rel, real = L.rel_to(root, a.report)
     if not os.path.isfile(real):
         die("找不到报告：%s" % a.report)
@@ -571,7 +632,12 @@ def cmd_check(root, a):
         record_check(root, st, ctype, verdict, source, rel)
         st["checks"][-1]["report_hash"] = meta
         L.save_task(root, st)
-        print("清单检查已记录：%s。%s" % (verdict, "请按报告补全关键项清单和理解，再请用户确认。" if verdict != "通过" else ""))
+        if verdict == "通过":
+            print("清单检查已记录：通过。下一步：qflow state 待确认，然后把确认页发给用户。")
+        else:
+            n = checklist_fail_streak(st)
+            print("清单检查已记录：%s。%s" % (verdict, ask_user_about_checklist(n) if n >= 2 else
+                  "请按报告改好任务单，再让检查员重新检查。清单检查只看清单本身：由你验证的项在确认前保持待验证即可，不要为了通过检查去提前标成已验证或豁免。"))
         return
     if st["status"] != "待关闭":
         die("交付检查要先进入待关闭（qflow state 待关闭）。")

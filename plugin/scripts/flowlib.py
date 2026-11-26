@@ -308,6 +308,16 @@ def verify_quote(root, quote, after, short_after=None):
         after = max(after, short_after)
     if not _norm(quote):
         raise FlowError("需要填写用户原话（--quote），请填用户回复的完整句子。")
+    # 用户分几条回答的（比如点了几个选项），可以用分号把几条连起来引用，每一条都要是用户的原话。
+    parts = [x for x in re.split(r"[；;\n]+", quote) if _norm(x)]
+    if len(parts) > 1:
+        times = []
+        for part in parts:
+            try:
+                times.append(verify_quote(root, part, after, short_after))
+            except FlowError:
+                raise FlowError("“%s”不是 %s 之后用户说过的话。几条回答用分号连起来引用时，每一条都要是用户的原话，不要加上问题的标题或自己的概括。" % (part.strip(), fmt_time(after)))
+        return max(times)
     try:
         with open(os.path.join(flow_root(root), "user-messages.jsonl"), encoding="utf-8") as f:
             for line in f:
@@ -319,7 +329,8 @@ def verify_quote(root, quote, after, short_after=None):
                     return m["ts"]
     except OSError:
         pass
-    raise FlowError("这句话不是 %s 之后用户说的完整句子。请先得到用户的回复，再引用完整原话。" % fmt_time(after))
+    raise FlowError("这句话不是 %s 之后用户说的完整句子。请先得到用户的回复，再引用完整原话。"
+                    "用户分几条回答的（比如点了几个选项），可以用分号把几条原话连起来引用，不要加上问题的标题。" % fmt_time(after))
 
 
 # ---------- 任务单解析 ----------
@@ -736,6 +747,10 @@ def record_text(root, st):
         c = st.get(key)
         if c:
             lines.append("- %s：v%d，%s，原话：%s" % (label, c["version"], fmt_time(c["ts"]), c.get("quote") or "各项已分别引用用户原话"))
+    for c in st.get("checks", []):
+        if c.get("type") == "清单" and c.get("verdict") == "用户裁定":
+            lines.append("- 清单检查：用户裁定按当时的清单开工（%s），原话：%s。检查员报告 %s 里的问题，交付检查时要逐条再核对。"
+                         % (fmt_time(c["ts"]), c.get("quote") or "—", c.get("report") or "—"))
     u = st.get("understood")
     if u:
         lines.append("- 开工前的复述：%s" % u["text"].replace("\n", " "))

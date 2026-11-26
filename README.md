@@ -154,7 +154,7 @@ ChatGPT 桌面版的 Work 模式和 Chat 模式不支持：前者在云端运行
 
 下面是 WorkBuddy 版的安装方法。**Codex 版**见本节末尾。
 
-1. 从 [Releases](../../releases) 下载 `quality-workflow-0.4.2.zip`。
+1. 从 [Releases](../../releases) 下载 `quality-workflow-0.4.3.zip`。
 2. 在 WorkBuddy 里新建一个任务，把压缩包拖进对话框，发送：
 
 ```
@@ -173,7 +173,7 @@ ChatGPT 桌面版的 Work 模式和 Chat 模式不支持：前者在云端运行
 
 ### Codex 版（ChatGPT 桌面版的 Codex 模式）
 
-1. 从 [Releases](../../releases) 下载 `quality-workflow-codex-0.4.2.zip`。
+1. 从 [Releases](../../releases) 下载 `quality-workflow-codex-0.4.3.zip`。
 2. 在 ChatGPT 桌面版的 Codex 里新建一个任务，把压缩包拖进对话框，发送：
 
 ```
